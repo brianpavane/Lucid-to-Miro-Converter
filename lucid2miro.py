@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-__version__ = "1.9.0"
+__version__ = "1.10.0"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Data model
@@ -1786,6 +1786,8 @@ See docs/LUCIDCHART_FORMATS.md for format guidance.
                    help="(Offline JSON) Pretty-print the output JSON")
     p.add_argument("--summary", action="store_true",
                    help="Print a conversion / upload summary (per file in batch mode)")
+    p.add_argument("--debug-counts", action="store_true",
+                   help="Print page/tab and object counts for both parsed input and written output")
     p.add_argument("--pages", metavar="N[,N]",
                    help="Comma-separated page titles or 1-based indices to include")
     p.add_argument("--clean-names", action="store_true",
@@ -1913,6 +1915,124 @@ def _maybe_extract_icons(doc: Document, input_path: Path) -> Optional[Dict[str, 
     return {"icons_dir": icons_dir, "icon_map": icon_map_path, "count": len(written)}
 
 
+def _doc_debug_counts(doc: Document) -> Dict[str, Any]:
+    nonempty_pages = [p for p in doc.pages if p.items or p.lines]
+    per_page: List[Dict[str, Any]] = []
+    for idx, page in enumerate(doc.pages, 1):
+        per_page.append({
+            "index": idx,
+            "title": page.title or f"Page {idx}",
+            "items": len(page.items),
+            "lines": len(page.lines),
+            "icons": sum(1 for item in page.items if item.is_icon),
+            "empty": not (page.items or page.lines),
+        })
+    return {
+        "pages_total": len(doc.pages),
+        "pages_nonempty": len(nonempty_pages),
+        "pages_empty": len(doc.pages) - len(nonempty_pages),
+        "items": sum(len(p.items) for p in doc.pages),
+        "lines": sum(len(p.lines) for p in doc.pages),
+        "icons": sum(1 for p in doc.pages for item in p.items if item.is_icon),
+        "per_page": per_page,
+    }
+
+
+def _output_debug_counts(output_path: Path, out_fmt: str) -> Dict[str, Any]:
+    if out_fmt == "vsdx":
+        out_doc = parse_vsdx(output_path)
+        counts = _doc_debug_counts(out_doc)
+        return {
+            "pages_total": counts["pages_total"],
+            "pages_nonempty": counts["pages_nonempty"],
+            "pages_empty": counts["pages_empty"],
+            "items": counts["items"],
+            "lines": counts["lines"],
+            "frames": counts["pages_nonempty"],
+            "shapes": counts["items"],
+            "texts": 0,
+            "images": counts["icons"],
+            "per_page": counts["per_page"],
+        }
+
+    board = json.loads(output_path.read_text(encoding="utf-8"))
+    widgets = board.get("board", {}).get("widgets", [])
+    frames = [w for w in widgets if w.get("type") == "frame"]
+    per_page: List[Dict[str, Any]] = []
+    for idx, frame in enumerate(frames, 1):
+        frame_id = frame.get("id")
+        children = [w for w in widgets if w.get("parentId") == frame_id]
+        per_page.append({
+            "index": idx,
+            "title": frame.get("title") or f"Frame {idx}",
+            "items": sum(1 for w in children if w.get("type") in {"shape", "text", "image"}),
+            "lines": sum(1 for w in children if w.get("type") == "line"),
+            "icons": sum(1 for w in children if w.get("type") == "image"),
+            "empty": False,
+        })
+    return {
+        "pages_total": len(frames),
+        "pages_nonempty": len(frames),
+        "pages_empty": 0,
+        "items": sum(1 for w in widgets if w.get("type") in {"shape", "text", "image"}),
+        "lines": sum(1 for w in widgets if w.get("type") == "line"),
+        "frames": len(frames),
+        "shapes": sum(1 for w in widgets if w.get("type") == "shape"),
+        "texts": sum(1 for w in widgets if w.get("type") == "text"),
+        "images": sum(1 for w in widgets if w.get("type") == "image"),
+        "per_page": per_page,
+    }
+
+
+def _print_debug_counts(input_path: Path, output_path: Path, doc: Document,
+                        out_fmt: str) -> None:
+    src = _doc_debug_counts(doc)
+    print()
+    print("Debug counts")
+    print("────────────")
+    print(f"  Source file   : {input_path}")
+    print(f"  Output file   : {output_path}")
+    print(f"  Read pages    : {src['pages_total']} total, {src['pages_nonempty']} non-empty, {src['pages_empty']} empty")
+    print(f"  Read objects  : {src['items']} items, {src['lines']} lines, {src['icons']} icon-shapes")
+    try:
+        out = _output_debug_counts(output_path, out_fmt)
+    except Exception as exc:
+        print(f"  Output read   : failed to inspect written file ({exc})")
+        print()
+        return
+    print(f"  Output pages  : {out['pages_total']} total, {out['pages_nonempty']} non-empty, {out['pages_empty']} empty")
+    if out_fmt == "vsdx":
+        print(f"  Output objs   : {out['items']} items, {out['lines']} lines, {out['images']} icon-shapes")
+    else:
+        print(f"  Output objs   : {out['frames']} frames, {out['shapes']} shapes, {out['texts']} texts, {out['images']} images, {out['lines']} lines")
+    print("  Per-page detail:")
+    max_rows = max(len(src["per_page"]), len(out.get("per_page", [])))
+    for idx in range(max_rows):
+        src_page = src["per_page"][idx] if idx < len(src["per_page"]) else None
+        out_page = out["per_page"][idx] if idx < len(out.get("per_page", [])) else None
+        label = src_page["title"] if src_page else out_page["title"]
+        label = (label[:46] + "...") if len(label) > 49 else label
+        if src_page and out_page:
+            print(
+                f"    [{idx + 1:02d}] {label}: "
+                f"read {src_page['items']} items/{src_page['lines']} lines/{src_page['icons']} icons"
+                f"{' [empty]' if src_page['empty'] else ''} -> "
+                f"out {out_page['items']} items/{out_page['lines']} lines/{out_page['icons']} icons"
+            )
+        elif src_page:
+            print(
+                f"    [{idx + 1:02d}] {label}: "
+                f"read {src_page['items']} items/{src_page['lines']} lines/{src_page['icons']} icons"
+                f"{' [empty]' if src_page['empty'] else ''} -> out skipped"
+            )
+        else:
+            print(
+                f"    [{idx + 1:02d}] {label}: "
+                f"out {out_page['items']} items/{out_page['lines']} lines/{out_page['icons']} icons"
+            )
+    print()
+
+
 def _print_summary(input_path: Path, output_path: Path, fmt: str, stats: Dict,
                    out_fmt: str = "json") -> None:
     doc     = stats["doc"]
@@ -1982,6 +2102,9 @@ def _run_single(args) -> None:
             ic = stats["icon_stats"]
             print(f"  Icons   → {ic['icons_dir']}/ ({ic['count']} files)")
             print(f"  Icon map template → {ic['icon_map']}")
+    if args.debug_counts:
+        _print_debug_counts(input_path, output_path, stats["doc"],
+                            getattr(args, "output_format", "json"))
 
 
 def _run_batch(args) -> None:
@@ -2035,6 +2158,9 @@ def _run_batch(args) -> None:
                                out_fmt=getattr(args, "output_format", "json"))
             else:
                 print(f"  ✓  {input_path.name.ljust(col_w)}  →  {output_path.name}")
+            if args.debug_counts:
+                _print_debug_counts(input_path, output_path, stats["doc"],
+                                    getattr(args, "output_format", "json"))
         except Exception as exc:
             fail += 1
             failures.append((input_path.name, str(exc)))

@@ -165,6 +165,12 @@ in a grid instead of the correct nested layout.
 # Offline: convert to Miro JSON
 python lucid2miro.py diagram.vsdx
 
+# Offline: write a Visio file for Miro "Import from Visio"
+python lucid2miro.py diagram.json --output-format vsdx
+
+# Validate page/tab and object counts before and after writing
+python lucid2miro.py diagram.json --output-format vsdx --debug-counts
+
 # Direct upload to a new Miro board
 export MIRO_TOKEN=your_token_here
 python lucid2miro.py diagram.vsdx --upload
@@ -180,7 +186,7 @@ python lucid2miro.py diagram.vsdx --upload --dry-run --summary
 
 1. Export from LucidChart: File → Export → Visio (`.vsdx`)
 2. In Miro: **+** → **Upload from computer** → select the `.vsdx` file
-3. Each Visio page becomes a Miro Frame
+3. Each non-empty Visio page becomes a Miro Frame
 
 > **Prefer the REST API path** (`lucid2miro --upload`) over the manual UI
 > import — it supports batch processing, custom naming, icon mapping, and
@@ -194,6 +200,12 @@ python lucid2miro.py diagram.vsdx --upload --dry-run --summary
   straight connectors in Miro
 - Custom icons are extracted to `<stem>_icons/`; update
   `<stem>_icon_map.json` with hosted URLs and pass `--icon-map` to include them
+- Generated `.vsdx` output skips empty pages; `--debug-counts` can be used to
+  confirm how many pages/tabs and objects were read from the source and written
+  to the output file
+- `--debug-counts` also prints a per-page breakdown with page titles and
+  counts for items, lines, and icon-shapes, plus whether a page was skipped
+  on output because it was empty
 
 ---
 
@@ -291,6 +303,7 @@ browser-based) versus using **`lucid2miro --upload`** (REST API, automated).
 | Page filtering | ❌ all pages | ✅ `--pages` |
 | Upload to existing board | ❌ creates new | ✅ `--board-id` |
 | Dry-run / preview | ❌ | ✅ `--dry-run --summary` |
+| Count validation | ❌ | ✅ `--debug-counts` for offline output |
 | Editable shapes in Miro | ✅ | ✅ |
 | Miro token required | ❌ (browser auth) | ✅ `MIRO_TOKEN` env var or `--token` |
 | No install required | ✅ browser | ✅ single Python file |

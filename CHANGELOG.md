@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.10.0] — 2026-04-02
+
+### Changed
+
+- Version bump to 1.10.0
+
+### Security
+
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- All checks passed (98 tests)
+
 ## [1.9.0] — 2026-04-02
 
 ### Changed
@@ -7,6 +18,16 @@
 - `vsdx_writer.py`: `_page_xml()` now accepts and writes both `PageWidth` and
   `PageHeight` in `<PageSheet><PageProps>`, providing full page bounds to
   consumers (previously only `PageHeight` was written)
+- `lucid2miro.py`: standalone VSDX writer now uses the same page-bounds logic
+  and no longer fails on missing `DPI` in the single-file path
+- `lucid2miro.py`: JSON/CSV → VSDX standalone conversion now correctly calls
+  `_layout_page()` in the single-file CLI path
+- New CLI flag: `--debug-counts` prints page/tab and object counts from parsed
+  input, then re-opens the written output and prints the resulting counts
+- `--debug-counts` now includes a per-page breakdown with page titles plus
+  item, line, and icon counts, making empty-page skips visible in the CLI
+- Documentation updated to clarify that generated `.vsdx` output skips empty
+  pages, and that Miro imports each non-empty Visio page as a Frame
 - Version bump to 1.9.0
 
 ### Security

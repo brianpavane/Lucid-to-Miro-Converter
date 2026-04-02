@@ -65,6 +65,8 @@ cd Lucid-to-Miro-Converter
 ### Offline VSDX output (no Miro account or token needed)
 
 Import the output via Miro **→ "Import from Visio"** — no REST API required.
+Each non-empty source page/tab is written as a Visio page; Miro imports those
+pages as Frames.
 
 ```bash
 # VSDX passthrough — original layout preserved
@@ -76,6 +78,9 @@ python lucid2miro.py diagram.json --output-format vsdx
 
 # Batch — convert all CSVs to VSDX
 python lucid2miro.py ./exports/ --format csv --output-format vsdx --output-dir ./out/
+
+# Debug counts — compare parsed input vs written output
+python lucid2miro.py diagram.json --output-format vsdx --debug-counts
 ```
 
 ### Offline JSON output (no Miro account needed)
@@ -128,6 +133,7 @@ python lucid2miro.py <input-dir/> --format vsdx|csv|json --upload [upload-option
 | `-t, --title TITLE` | Board title | Title from source file |
 | `-s, --scale N` | Uniform coordinate scale factor | `1.0` |
 | `--summary` | Print conversion / upload stats | off |
+| `--debug-counts` | Print overall and per-page page/tab counts, titles, and object counts for parsed input and written output | off |
 | `--pages N[,N]` | Page titles or 1-based indices to include | all |
 | `--version` | Print version and exit | — |
 
@@ -186,6 +192,9 @@ python lucid2miro.py diagram.csv
 # Custom title, pretty output, summary
 python lucid2miro.py diagram.vsdx -t "My Architecture" --pretty --summary
 
+# Debug page and object counts before/after writing
+python lucid2miro.py diagram.json --output-format vsdx --debug-counts
+
 # Specific pages by title
 python lucid2miro.py diagram.vsdx --pages "HA,Forwarding Rules"
 
@@ -226,6 +235,20 @@ python lucid2miro.py diagram.vsdx --upload --icon-map diagram_icon_map.json
 **`--clean-names`** requires `--output-dir` to point to a **different** directory than the input to prevent source files from being overwritten.
 
 The output directory is created automatically (including nested paths) if it does not exist.
+
+`--debug-counts` is especially helpful when validating multi-tab conversions. It
+reports source page counts, non-empty vs empty pages, and object totals from the
+parsed input, then re-opens the written file and reports the same counts for the
+output. It also prints a per-page breakdown with page titles, item counts, line
+counts, icon counts, and whether a page was skipped on output. Empty pages are
+intentionally skipped in generated `.vsdx` output.
+
+Example per-page debug lines:
+
+```text
+[01] HA: read 41 items/20 lines/6 icons -> out 41 items/20 lines/0 icons
+[27] Page 27: read 0 items/0 lines/0 icons [empty] -> out skipped
+```
 
 ---
 
@@ -322,6 +345,7 @@ auto-lays out the diagram:
 - **Three input formats:** VSDX (recommended), CSV, JSON
 - **Three output modes:** VSDX (no API needed), Miro JSON, REST API upload
 - **VSDX output** (`--output-format vsdx`): any input → Visio file → import via Miro "Import from Visio"
+- **Debug validation** (`--debug-counts`): compare page/tab and object counts before and after writing output
 - **VSDX input:** original layout, per-shape styling, and embedded icons preserved
 - Batch / bulk mode — convert an entire folder in one command
 - Multi-tab support — each Lucidchart page → a Miro frame, placed side-by-side
@@ -386,7 +410,7 @@ lucid_to_miro/            ← importable package (same logic, modular layout)
 │   ├── miro.py
 │   ├── shape_map.py
 │   ├── layout.py
-│   └── vsdx_writer.py    ← Visio writer (new in v1.7.0)
+│   └── vsdx_writer.py    ← Visio writer
 └── api/                  ← REST API client and uploader (new in v1.4.0)
     ├── miro_client.py
     └── uploader.py
