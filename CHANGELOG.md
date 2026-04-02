@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.0] — 2026-04-01
+
+### Added
+- **Batch / bulk conversion mode** — pass a directory as `input` to convert all files of a given format at once
+  - `--format csv|json` selects which file type to glob (required in batch mode)
+  - `--output-dir DIR` sets the destination directory (created automatically if absent, including nested paths; defaults to input directory)
+  - Output filename = input stem + `.miro.json` (e.g. `diagram.csv` → `diagram.miro.json`)
+  - All existing flags (`--scale`, `--pretty`, `--summary`, `--title`) apply to every file in the batch
+  - Per-file `✓`/`✗` progress lines; final tally printed on completion
+  - Non-zero exit code on any failure so CI/scripts detect partial failures
+  - 11 new tests (62 total)
+
+### Security
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- **HIGH fixed:** Batch output paths now resolved via `Path.resolve()` and asserted to remain inside `output_dir`, preventing symlink-based traversal
+- All other checks passed
+
 ## [1.0.0] — 2026-04-01
 
 ### Changed (from Node.js prototype)

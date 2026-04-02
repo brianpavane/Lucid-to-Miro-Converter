@@ -1,6 +1,6 @@
 # Lucid-to-Miro Converter
 
-[![Release](https://img.shields.io/github/v/release/brianpavane/Lucid-to-Miro-Converter)](https://github.com/brianpavane/Lucid-to-Miro-Converter/releases/tag/v1.0.0)
+[![Release](https://img.shields.io/github/v/release/brianpavane/Lucid-to-Miro-Converter)](https://github.com/brianpavane/Lucid-to-Miro-Converter/releases/latest)
 
 Convert Lucidchart exports to Miro-importable JSON.
 
@@ -13,6 +13,7 @@ Convert Lucidchart exports to Miro-importable JSON.
 | `.csv`  | File → Export → CSV |
 
 **Features:**
+- **Batch mode** — convert an entire folder of `.csv` or `.json` files in one command
 - Multi-tab / multi-page diagrams → one Miro frame per tab, placed side-by-side
 - Auto-layout: positions and sizes all shapes (neither export format carries coordinates)
 - CSV: uses "Contained By" hierarchy to nest shapes inside containers with correct indentation
@@ -26,21 +27,34 @@ Convert Lucidchart exports to Miro-importable JSON.
 ## Usage
 
 ```bash
+# Single file
 python lucid2miro.py <input.json|csv> [options]
+
+# Batch — convert every .csv (or .json) in a folder
+python lucid2miro.py <input-dir/> --format csv|json --output-dir <output-dir/> [options]
 ```
 
 ### Options
 
+**Batch flags** (only when `input` is a directory):
+
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-o, --output FILE` | Output file path | `<input>.miro.json` |
+| `--format csv\|json` | File type to convert *(required)* | — |
+| `--output-dir DIR` | Directory for output files | Input directory |
+
+**Single-file & shared flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-o, --output FILE` | Output file path *(single-file only)* | `<input>.miro.json` |
 | `-t, --title TITLE` | Miro board title | Title from source file |
 | `-s, --scale N` | Uniform coordinate scale factor | `1.0` |
 | `--pretty` | Pretty-print output JSON | off |
-| `--summary` | Print conversion stats to stdout | off |
-| `--pages N[,N]` | Include only these pages (titles or 1-based indices) | all |
+| `--summary` | Print conversion stats (per-file in batch) | off |
+| `--pages N[,N]` | Include only these pages — titles or 1-based indices *(single-file only)* | all |
 
-### Examples
+### Single-file examples
 
 ```bash
 # Convert a JSON export
@@ -55,6 +69,22 @@ python lucid2miro.py diagram.json --scale 1.5 --pages "HA,Forwarding Rules"
 # Export only pages 1 and 3 by index
 python lucid2miro.py diagram.csv --pages "1,3"
 ```
+
+### Batch examples
+
+```bash
+# Convert all CSVs in ./exports/ → ./miro/
+python lucid2miro.py ./exports/ --format csv --output-dir ./miro/
+
+# Convert all JSONs with per-file summaries
+python lucid2miro.py ./exports/ --format json --output-dir ./miro/ --summary
+
+# Batch with scaling and pretty output; output defaults to input folder
+python lucid2miro.py ./exports/ --format csv --scale 1.5 --pretty
+```
+
+Output filenames mirror input stems: `diagram.csv` → `diagram.miro.json`.
+The output directory is created automatically (including any parent directories) if it does not exist.
 
 ## Output format
 

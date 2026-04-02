@@ -361,5 +361,147 @@ class TestCli(unittest.TestCase):
             self.assertEqual(frames[0]["title"], "Architecture")
 
 
+# ─── Batch mode ───────────────────────────────────────────────────────────────
+
+class TestBatch(unittest.TestCase):
+    """Tests for batch/bulk conversion mode (directory input)."""
+
+    def setUp(self):
+        from lucid2miro import main
+        self.main = main
+
+    def _make_input_dir(self, tmp: str, fmt: str, count: int = 3) -> Path:
+        """Copy the sample fixture into a temp directory <count> times."""
+        import shutil
+        src = CSV_FILE if fmt == "csv" else JSON_FILE
+        d = Path(tmp) / "inputs"
+        d.mkdir()
+        for i in range(count):
+            shutil.copy(src, d / f"diagram_{i}.{fmt}")
+        return d
+
+    # ── CSV batch ─────────────────────────────────────────────────────────────
+
+    def test_batch_csv_creates_output_files(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "csv", count=3)
+            out_dir = Path(tmp) / "outputs"
+            self.main([str(in_dir), "--format", "csv", "--output-dir", str(out_dir)])
+            out_files = list(out_dir.glob("*.miro.json"))
+            self.assertEqual(len(out_files), 3)
+
+    def test_batch_csv_output_filenames_match_input(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "csv", count=2)
+            out_dir = Path(tmp) / "outputs"
+            self.main([str(in_dir), "--format", "csv", "--output-dir", str(out_dir)])
+            stems = {f.stem.replace(".miro", "") for f in out_dir.glob("*.miro.json")}
+            self.assertIn("diagram_0", stems)
+            self.assertIn("diagram_1", stems)
+
+    def test_batch_csv_output_is_valid_miro_json(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "csv", count=1)
+            out_dir = Path(tmp) / "outputs"
+            self.main([str(in_dir), "--format", "csv", "--output-dir", str(out_dir)])
+            out_file = next(out_dir.glob("*.miro.json"))
+            data = json.loads(out_file.read_text())
+            self.assertEqual(data["version"], "1")
+            self.assertIn("board", data)
+            self.assertIsInstance(data["board"]["widgets"], list)
+
+    # ── JSON batch ────────────────────────────────────────────────────────────
+
+    def test_batch_json_creates_output_files(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "json", count=2)
+            out_dir = Path(tmp) / "outputs"
+            self.main([str(in_dir), "--format", "json", "--output-dir", str(out_dir)])
+            out_files = list(out_dir.glob("*.miro.json"))
+            self.assertEqual(len(out_files), 2)
+
+    def test_batch_json_output_is_valid_miro_json(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "json", count=1)
+            out_dir = Path(tmp) / "outputs"
+            self.main([str(in_dir), "--format", "json", "--output-dir", str(out_dir)])
+            out_file = next(out_dir.glob("*.miro.json"))
+            data = json.loads(out_file.read_text())
+            self.assertEqual(data["version"], "1")
+
+    # ── Output directory creation ─────────────────────────────────────────────
+
+    def test_batch_creates_output_dir_if_missing(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "csv", count=1)
+            out_dir = Path(tmp) / "nested" / "new_dir"
+            self.assertFalse(out_dir.exists())
+            self.main([str(in_dir), "--format", "csv", "--output-dir", str(out_dir)])
+            self.assertTrue(out_dir.exists())
+            self.assertEqual(len(list(out_dir.glob("*.miro.json"))), 1)
+
+    def test_batch_defaults_output_to_input_dir(self):
+        """When --output-dir is omitted, outputs land alongside the inputs."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir = self._make_input_dir(tmp, "csv", count=2)
+            self.main([str(in_dir), "--format", "csv"])
+            out_files = list(in_dir.glob("*.miro.json"))
+            self.assertEqual(len(out_files), 2)
+
+    # ── Error handling ────────────────────────────────────────────────────────
+
+    def test_batch_missing_format_exits(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir = self._make_input_dir(tmp, "csv", count=1)
+            with self.assertRaises(SystemExit) as cm:
+                self.main([str(in_dir)])   # no --format
+            self.assertNotEqual(cm.exception.code, 0)
+
+    def test_batch_no_matching_files_exits(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "csv", count=1)
+            out_dir = Path(tmp) / "out"
+            with self.assertRaises(SystemExit) as cm:
+                # Ask for json but only csv files exist
+                self.main([str(in_dir), "--format", "json", "--output-dir", str(out_dir)])
+            self.assertNotEqual(cm.exception.code, 0)
+
+    def test_batch_pretty_output_is_indented(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "csv", count=1)
+            out_dir = Path(tmp) / "out"
+            self.main([str(in_dir), "--format", "csv",
+                       "--output-dir", str(out_dir), "--pretty"])
+            out_file = next(out_dir.glob("*.miro.json"))
+            raw = out_file.read_text()
+            self.assertIn("\n", raw)   # pretty-printed has newlines
+
+    def test_batch_scale_applied(self):
+        """Scaling in batch mode produces larger frame geometries."""
+        import tempfile, shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir   = self._make_input_dir(tmp, "csv", count=1)
+            out1_dir = Path(tmp) / "out1x"
+            out2_dir = Path(tmp) / "out2x"
+            self.main([str(in_dir), "--format", "csv", "--output-dir", str(out1_dir)])
+            self.main([str(in_dir), "--format", "csv", "--output-dir", str(out2_dir),
+                       "--scale", "2.0"])
+            d1 = json.loads(next(out1_dir.glob("*.miro.json")).read_text())
+            d2 = json.loads(next(out2_dir.glob("*.miro.json")).read_text())
+            f1 = next(w for w in d1["board"]["widgets"] if w["type"] == "frame")
+            f2 = next(w for w in d2["board"]["widgets"] if w["type"] == "frame")
+            self.assertGreater(f2["geometry"]["width"], f1["geometry"]["width"])
+
+
 if __name__ == "__main__":
     unittest.main()
