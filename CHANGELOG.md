@@ -1,9 +1,31 @@
 # Changelog
 
+## [1.11.0] — 2026-04-02
+
+### Changed
+
+- Version bump to 1.11.0
+
+### Security
+
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- All checks passed (98 tests)
+
 ## [1.10.0] — 2026-04-02
 
 ### Changed
 
+- VSDX writer now writes key geometry values in both forms expected by Visio
+  consumers:
+  - `V="..."` attributes
+  - element text content, e.g. `<PinX V="3.95">3.95</PinX>`
+- This dual-form output is now applied to:
+  - page bounds (`PageWidth`, `PageHeight`)
+  - shape geometry (`PinX`, `PinY`, `Width`, `Height`, `LocPinX`, `LocPinY`)
+  - connector geometry and arrow cells
+- Intended to improve compatibility with Miro's native **Import from Visio**
+  flow in cases where generated `.vsdx` files previously imported as blank
+- Documentation updated with VSDX import compatibility notes and retest guidance
 - Version bump to 1.10.0
 
 ### Security

@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-__version__ = "1.10.0"
+__version__ = "1.11.0"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Data model
@@ -1058,15 +1058,15 @@ def _vw_shape(int_id: int, item, page_h_in: float) -> str:
     return (
         f'<Shape ID="{int_id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">\n'
         f'  <XForm xmlns="{ns}">\n'
-        f'    <PinX V="{pin_x:.6f}"/>\n'
-        f'    <PinY V="{pin_y:.6f}"/>\n'
-        f'    <Width V="{w_in:.6f}"/>\n'
-        f'    <Height V="{h_in:.6f}"/>\n'
-        f'    <LocPinX V="{w_in/2:.6f}" F="Width*0.5"/>\n'
-        f'    <LocPinY V="{h_in/2:.6f}" F="Height*0.5"/>\n'
+        f'    <PinX V="{pin_x:.6f}">{pin_x:.6f}</PinX>\n'
+        f'    <PinY V="{pin_y:.6f}">{pin_y:.6f}</PinY>\n'
+        f'    <Width V="{w_in:.6f}">{w_in:.6f}</Width>\n'
+        f'    <Height V="{h_in:.6f}">{h_in:.6f}</Height>\n'
+        f'    <LocPinX V="{w_in/2:.6f}" F="Width*0.5">{w_in/2:.6f}</LocPinX>\n'
+        f'    <LocPinY V="{h_in/2:.6f}" F="Height*0.5">{h_in/2:.6f}</LocPinY>\n'
         f'  </XForm>\n'
-        f'  <Cell N="FillForegnd" V="{fill}"/>\n'
-        f'  <Cell N="LineColor"   V="{lc}"/>{te}\n'
+        f'  <Cell N="FillForegnd" V="{fill}">{fill}</Cell>\n'
+        f'  <Cell N="LineColor"   V="{lc}">{lc}</Cell>{te}\n'
         '</Shape>'
     )
 
@@ -1084,12 +1084,12 @@ def _vw_connector(conn_id: int, line, id_map: dict, item_map: dict, page_h_in: f
     te = f"\n  <Text>{label}</Text>" if label else ""
     shape = (
         f'<Shape ID="{conn_id}" Type="Edge" LineStyle="0" FillStyle="0" TextStyle="0">\n'
-        f'  <Cell N="BeginX"     V="{bx:.6f}"/>\n'
-        f'  <Cell N="BeginY"     V="{by:.6f}"/>\n'
-        f'  <Cell N="EndX"       V="{ex:.6f}"/>\n'
-        f'  <Cell N="EndY"       V="{ey:.6f}"/>\n'
-        f'  <Cell N="BeginArrow" V="{ba}"/>\n'
-        f'  <Cell N="EndArrow"   V="{ea}"/>{te}\n'
+        f'  <Cell N="BeginX"     V="{bx:.6f}">{bx:.6f}</Cell>\n'
+        f'  <Cell N="BeginY"     V="{by:.6f}">{by:.6f}</Cell>\n'
+        f'  <Cell N="EndX"       V="{ex:.6f}">{ex:.6f}</Cell>\n'
+        f'  <Cell N="EndY"       V="{ey:.6f}">{ey:.6f}</Cell>\n'
+        f'  <Cell N="BeginArrow" V="{ba}">{ba}</Cell>\n'
+        f'  <Cell N="EndArrow"   V="{ea}">{ea}</Cell>{te}\n'
         '</Shape>'
     )
     connects = []
@@ -1127,8 +1127,8 @@ def _vw_page_xml(page, page_w_in: float, page_h_in: float) -> str:
     page_sheet = (
         f'<PageSheet xmlns="{ns}" LineStyle="0" FillStyle="0" TextStyle="0">\n'
         f'  <PageProps>\n'
-        f'    <PageWidth V="{page_w_in:.6f}"/>\n'
-        f'    <PageHeight V="{page_h_in:.6f}"/>\n'
+        f'    <PageWidth V="{page_w_in:.6f}">{page_w_in:.6f}</PageWidth>\n'
+        f'    <PageHeight V="{page_h_in:.6f}">{page_h_in:.6f}</PageHeight>\n'
         f'  </PageProps>\n'
         f'</PageSheet>'
     )
@@ -1924,7 +1924,8 @@ def _doc_debug_counts(doc: Document) -> Dict[str, Any]:
             "title": page.title or f"Page {idx}",
             "items": len(page.items),
             "lines": len(page.lines),
-            "icons": sum(1 for item in page.items if item.is_icon),
+            "icon_like": sum(1 for item in page.items if item.is_icon),
+            "embedded_icons": sum(1 for item in page.items if item.is_icon and item.image_data),
             "empty": not (page.items or page.lines),
         })
     return {
@@ -1933,7 +1934,8 @@ def _doc_debug_counts(doc: Document) -> Dict[str, Any]:
         "pages_empty": len(doc.pages) - len(nonempty_pages),
         "items": sum(len(p.items) for p in doc.pages),
         "lines": sum(len(p.lines) for p in doc.pages),
-        "icons": sum(1 for p in doc.pages for item in p.items if item.is_icon),
+        "icon_like": sum(1 for p in doc.pages for item in p.items if item.is_icon),
+        "embedded_icons": sum(1 for p in doc.pages for item in p.items if item.is_icon and item.image_data),
         "per_page": per_page,
     }
 
@@ -1951,7 +1953,9 @@ def _output_debug_counts(output_path: Path, out_fmt: str) -> Dict[str, Any]:
             "frames": counts["pages_nonempty"],
             "shapes": counts["items"],
             "texts": 0,
-            "images": counts["icons"],
+            "images": counts["embedded_icons"],
+            "icon_like": counts["icon_like"],
+            "embedded_icons": counts["embedded_icons"],
             "per_page": counts["per_page"],
         }
 
@@ -1967,7 +1971,8 @@ def _output_debug_counts(output_path: Path, out_fmt: str) -> Dict[str, Any]:
             "title": frame.get("title") or f"Frame {idx}",
             "items": sum(1 for w in children if w.get("type") in {"shape", "text", "image"}),
             "lines": sum(1 for w in children if w.get("type") == "line"),
-            "icons": sum(1 for w in children if w.get("type") == "image"),
+            "icon_like": sum(1 for w in children if w.get("type") == "image"),
+            "embedded_icons": sum(1 for w in children if w.get("type") == "image"),
             "empty": False,
         })
     return {
@@ -1980,6 +1985,8 @@ def _output_debug_counts(output_path: Path, out_fmt: str) -> Dict[str, Any]:
         "shapes": sum(1 for w in widgets if w.get("type") == "shape"),
         "texts": sum(1 for w in widgets if w.get("type") == "text"),
         "images": sum(1 for w in widgets if w.get("type") == "image"),
+        "icon_like": sum(1 for w in widgets if w.get("type") == "image"),
+        "embedded_icons": sum(1 for w in widgets if w.get("type") == "image"),
         "per_page": per_page,
     }
 
@@ -1993,7 +2000,8 @@ def _print_debug_counts(input_path: Path, output_path: Path, doc: Document,
     print(f"  Source file   : {input_path}")
     print(f"  Output file   : {output_path}")
     print(f"  Read pages    : {src['pages_total']} total, {src['pages_nonempty']} non-empty, {src['pages_empty']} empty")
-    print(f"  Read objects  : {src['items']} items, {src['lines']} lines, {src['icons']} icon-shapes")
+    print(f"  Read objects  : {src['items']} items, {src['lines']} lines")
+    print(f"  Read icons    : {src['icon_like']} icon-like shapes, {src['embedded_icons']} with embedded image data")
     try:
         out = _output_debug_counts(output_path, out_fmt)
     except Exception as exc:
@@ -2002,7 +2010,8 @@ def _print_debug_counts(input_path: Path, output_path: Path, doc: Document,
         return
     print(f"  Output pages  : {out['pages_total']} total, {out['pages_nonempty']} non-empty, {out['pages_empty']} empty")
     if out_fmt == "vsdx":
-        print(f"  Output objs   : {out['items']} items, {out['lines']} lines, {out['images']} icon-shapes")
+        print(f"  Output objs   : {out['items']} items, {out['lines']} lines")
+        print(f"  Output icons  : {out['icon_like']} icon-like shapes, {out['embedded_icons']} embedded image icons")
     else:
         print(f"  Output objs   : {out['frames']} frames, {out['shapes']} shapes, {out['texts']} texts, {out['images']} images, {out['lines']} lines")
     print("  Per-page detail:")
@@ -2015,20 +2024,24 @@ def _print_debug_counts(input_path: Path, output_path: Path, doc: Document,
         if src_page and out_page:
             print(
                 f"    [{idx + 1:02d}] {label}: "
-                f"read {src_page['items']} items/{src_page['lines']} lines/{src_page['icons']} icons"
+                f"read {src_page['items']} items/{src_page['lines']} lines/"
+                f"{src_page['icon_like']} icon-like/{src_page['embedded_icons']} embedded"
                 f"{' [empty]' if src_page['empty'] else ''} -> "
-                f"out {out_page['items']} items/{out_page['lines']} lines/{out_page['icons']} icons"
+                f"out {out_page['items']} items/{out_page['lines']} lines/"
+                f"{out_page['icon_like']} icon-like/{out_page['embedded_icons']} embedded"
             )
         elif src_page:
             print(
                 f"    [{idx + 1:02d}] {label}: "
-                f"read {src_page['items']} items/{src_page['lines']} lines/{src_page['icons']} icons"
+                f"read {src_page['items']} items/{src_page['lines']} lines/"
+                f"{src_page['icon_like']} icon-like/{src_page['embedded_icons']} embedded"
                 f"{' [empty]' if src_page['empty'] else ''} -> out skipped"
             )
         else:
             print(
                 f"    [{idx + 1:02d}] {label}: "
-                f"out {out_page['items']} items/{out_page['lines']} lines/{out_page['icons']} icons"
+                f"out {out_page['items']} items/{out_page['lines']} lines/"
+                f"{out_page['icon_like']} icon-like/{out_page['embedded_icons']} embedded"
             )
     print()
 
