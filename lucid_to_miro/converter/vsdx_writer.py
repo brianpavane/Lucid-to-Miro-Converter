@@ -186,21 +186,54 @@ def _shape_xml(int_id: int, item: Item, page_h_in: float) -> str:
     line  = _colour(item.style.stroke_color)
     label = _esc(item.text or "")
     text_elem = f"\n  <Text>{label}</Text>" if label else ""
+    # Include a simple rectangle path so Visio consumers have visible geometry,
+    # not just transform cells.
+    geom = (
+        '\n  <Section N="Geometry" IX="0">\n'
+        '    <Row T="MoveTo" IX="0">\n'
+        '      <Cell N="X" V="0" F="Width*0">0</Cell>\n'
+        '      <Cell N="Y" V="0" F="Height*0">0</Cell>\n'
+        '    </Row>\n'
+        '    <Row T="LineTo" IX="1">\n'
+        '      <Cell N="X" V="1" F="Width*1">1</Cell>\n'
+        '      <Cell N="Y" V="0" F="Height*0">0</Cell>\n'
+        '    </Row>\n'
+        '    <Row T="LineTo" IX="2">\n'
+        '      <Cell N="X" V="1" F="Width*1">1</Cell>\n'
+        '      <Cell N="Y" V="1" F="Height*1">1</Cell>\n'
+        '    </Row>\n'
+        '    <Row T="LineTo" IX="3">\n'
+        '      <Cell N="X" V="0" F="Width*0">0</Cell>\n'
+        '      <Cell N="Y" V="1" F="Height*1">1</Cell>\n'
+        '    </Row>\n'
+        '    <Row T="LineTo" IX="4">\n'
+        '      <Cell N="X" V="0" F="Width*0">0</Cell>\n'
+        '      <Cell N="Y" V="0" F="Height*0">0</Cell>\n'
+        '    </Row>\n'
+        '  </Section>'
+    )
 
     ns = _NS_VISIO
     return (
         f'<Shape ID="{int_id}" Type="Shape"'
         ' LineStyle="0" FillStyle="0" TextStyle="0">\n'
+        f'  <Cell N="PinX" V="{pin_x:.6f}">{pin_x:.6f}</Cell>\n'
+        f'  <Cell N="PinY" V="{pin_y:.6f}">{pin_y:.6f}</Cell>\n'
+        f'  <Cell N="Width" V="{w_in:.6f}">{w_in:.6f}</Cell>\n'
+        f'  <Cell N="Height" V="{h_in:.6f}">{h_in:.6f}</Cell>\n'
+        f'  <Cell N="LocPinX" V="{loc_x:.6f}" F="Width*0.5">{loc_x:.6f}</Cell>\n'
+        f'  <Cell N="LocPinY" V="{loc_y:.6f}" F="Height*0.5">{loc_y:.6f}</Cell>\n'
         f'  <XForm xmlns="{ns}">\n'
-        f'    <PinX V="{pin_x:.6f}"/>\n'
-        f'    <PinY V="{pin_y:.6f}"/>\n'
-        f'    <Width V="{w_in:.6f}"/>\n'
-        f'    <Height V="{h_in:.6f}"/>\n'
-        f'    <LocPinX V="{loc_x:.6f}" F="Width*0.5"/>\n'
-        f'    <LocPinY V="{loc_y:.6f}" F="Height*0.5"/>\n'
+        f'    <PinX V="{pin_x:.6f}">{pin_x:.6f}</PinX>\n'
+        f'    <PinY V="{pin_y:.6f}">{pin_y:.6f}</PinY>\n'
+        f'    <Width V="{w_in:.6f}">{w_in:.6f}</Width>\n'
+        f'    <Height V="{h_in:.6f}">{h_in:.6f}</Height>\n'
+        f'    <LocPinX V="{loc_x:.6f}" F="Width*0.5">{loc_x:.6f}</LocPinX>\n'
+        f'    <LocPinY V="{loc_y:.6f}" F="Height*0.5">{loc_y:.6f}</LocPinY>\n'
         f'  </XForm>\n'
-        f'  <Cell N="FillForegnd" V="{fill}"/>\n'
-        f'  <Cell N="LineColor"   V="{line}"/>'
+        f'  <Cell N="FillForegnd" V="{fill}">{fill}</Cell>\n'
+        f'  <Cell N="LineColor"   V="{line}">{line}</Cell>'
+        f'{geom}'
         f'{text_elem}\n'
         '</Shape>'
     )
@@ -237,12 +270,12 @@ def _connector_xml(
     shape = (
         f'<Shape ID="{conn_id}" Type="Edge"'
         ' LineStyle="0" FillStyle="0" TextStyle="0">\n'
-        f'  <Cell N="BeginX"    V="{bx:.6f}"/>\n'
-        f'  <Cell N="BeginY"    V="{by:.6f}"/>\n'
-        f'  <Cell N="EndX"      V="{ex:.6f}"/>\n'
-        f'  <Cell N="EndY"      V="{ey:.6f}"/>\n'
-        f'  <Cell N="BeginArrow" V="{b_arrow}"/>\n'
-        f'  <Cell N="EndArrow"   V="{e_arrow}"/>'
+        f'  <Cell N="BeginX"    V="{bx:.6f}">{bx:.6f}</Cell>\n'
+        f'  <Cell N="BeginY"    V="{by:.6f}">{by:.6f}</Cell>\n'
+        f'  <Cell N="EndX"      V="{ex:.6f}">{ex:.6f}</Cell>\n'
+        f'  <Cell N="EndY"      V="{ey:.6f}">{ey:.6f}</Cell>\n'
+        f'  <Cell N="BeginArrow" V="{b_arrow}">{b_arrow}</Cell>\n'
+        f'  <Cell N="EndArrow"   V="{e_arrow}">{e_arrow}</Cell>'
         f'{text_elem}\n'
         '</Shape>'
     )
@@ -295,8 +328,8 @@ def _page_xml(page: Page, page_w_in: float, page_h_in: float) -> str:
     page_sheet = (
         f'<PageSheet xmlns="{ns}" LineStyle="0" FillStyle="0" TextStyle="0">\n'
         f'  <PageProps>\n'
-        f'    <PageWidth V="{page_w_in:.6f}"/>\n'
-        f'    <PageHeight V="{page_h_in:.6f}"/>\n'
+        f'    <PageWidth V="{page_w_in:.6f}">{page_w_in:.6f}</PageWidth>\n'
+        f'    <PageHeight V="{page_h_in:.6f}">{page_h_in:.6f}</PageHeight>\n'
         f'  </PageProps>\n'
         f'</PageSheet>'
     )

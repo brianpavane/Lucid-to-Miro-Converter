@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-__version__ = "1.11.0"
+__version__ = "1.12.0"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Data model
@@ -1054,9 +1054,39 @@ def _vw_shape(int_id: int, item, page_h_in: float) -> str:
     lc    = _vw_colour(item.style.stroke_color)
     label = _vw_esc(item.text or "")
     te    = f"\n  <Text>{label}</Text>" if label else ""
+    geom = (
+        '\n  <Section N="Geometry" IX="0">\n'
+        '    <Row T="MoveTo" IX="0">\n'
+        '      <Cell N="X" V="0" F="Width*0">0</Cell>\n'
+        '      <Cell N="Y" V="0" F="Height*0">0</Cell>\n'
+        '    </Row>\n'
+        '    <Row T="LineTo" IX="1">\n'
+        '      <Cell N="X" V="1" F="Width*1">1</Cell>\n'
+        '      <Cell N="Y" V="0" F="Height*0">0</Cell>\n'
+        '    </Row>\n'
+        '    <Row T="LineTo" IX="2">\n'
+        '      <Cell N="X" V="1" F="Width*1">1</Cell>\n'
+        '      <Cell N="Y" V="1" F="Height*1">1</Cell>\n'
+        '    </Row>\n'
+        '    <Row T="LineTo" IX="3">\n'
+        '      <Cell N="X" V="0" F="Width*0">0</Cell>\n'
+        '      <Cell N="Y" V="1" F="Height*1">1</Cell>\n'
+        '    </Row>\n'
+        '    <Row T="LineTo" IX="4">\n'
+        '      <Cell N="X" V="0" F="Width*0">0</Cell>\n'
+        '      <Cell N="Y" V="0" F="Height*0">0</Cell>\n'
+        '    </Row>\n'
+        '  </Section>'
+    )
     ns = _VSDXW_NS_VISIO
     return (
         f'<Shape ID="{int_id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">\n'
+        f'  <Cell N="PinX" V="{pin_x:.6f}">{pin_x:.6f}</Cell>\n'
+        f'  <Cell N="PinY" V="{pin_y:.6f}">{pin_y:.6f}</Cell>\n'
+        f'  <Cell N="Width" V="{w_in:.6f}">{w_in:.6f}</Cell>\n'
+        f'  <Cell N="Height" V="{h_in:.6f}">{h_in:.6f}</Cell>\n'
+        f'  <Cell N="LocPinX" V="{w_in/2:.6f}" F="Width*0.5">{w_in/2:.6f}</Cell>\n'
+        f'  <Cell N="LocPinY" V="{h_in/2:.6f}" F="Height*0.5">{h_in/2:.6f}</Cell>\n'
         f'  <XForm xmlns="{ns}">\n'
         f'    <PinX V="{pin_x:.6f}">{pin_x:.6f}</PinX>\n'
         f'    <PinY V="{pin_y:.6f}">{pin_y:.6f}</PinY>\n'
@@ -1066,7 +1096,7 @@ def _vw_shape(int_id: int, item, page_h_in: float) -> str:
         f'    <LocPinY V="{h_in/2:.6f}" F="Height*0.5">{h_in/2:.6f}</LocPinY>\n'
         f'  </XForm>\n'
         f'  <Cell N="FillForegnd" V="{fill}">{fill}</Cell>\n'
-        f'  <Cell N="LineColor"   V="{lc}">{lc}</Cell>{te}\n'
+        f'  <Cell N="LineColor"   V="{lc}">{lc}</Cell>{geom}{te}\n'
         '</Shape>'
     )
 

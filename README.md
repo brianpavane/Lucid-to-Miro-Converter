@@ -67,6 +67,11 @@ cd Lucid-to-Miro-Converter
 Import the output via Miro **→ "Import from Visio"** — no REST API required.
 Each non-empty source page/tab is written as a Visio page; Miro imports those
 pages as Frames.
+Recent compatibility fixes also write geometry values in both Visio forms
+(`V="..."` attributes and element text) to improve cases where generated VSDX
+files previously appeared blank when imported into Miro.
+Generated shapes now also include explicit rectangle geometry sections, not just
+position and size metadata.
 
 ```bash
 # VSDX passthrough — original layout preserved
@@ -133,7 +138,7 @@ python lucid2miro.py <input-dir/> --format vsdx|csv|json --upload [upload-option
 | `-t, --title TITLE` | Board title | Title from source file |
 | `-s, --scale N` | Uniform coordinate scale factor | `1.0` |
 | `--summary` | Print conversion / upload stats | off |
-| `--debug-counts` | Print overall and per-page page/tab counts, titles, and object counts for parsed input and written output | off |
+| `--debug-counts` | Print overall and per-page page/tab counts, titles, object counts, and icon diagnostics for parsed input and written output | off |
 | `--pages N[,N]` | Page titles or 1-based indices to include | all |
 | `--version` | Print version and exit | — |
 
@@ -240,15 +245,28 @@ The output directory is created automatically (including nested paths) if it doe
 reports source page counts, non-empty vs empty pages, and object totals from the
 parsed input, then re-opens the written file and reports the same counts for the
 output. It also prints a per-page breakdown with page titles, item counts, line
-counts, icon counts, and whether a page was skipped on output. Empty pages are
-intentionally skipped in generated `.vsdx` output.
+counts, icon diagnostics, and whether a page was skipped on output. Empty pages
+are intentionally skipped in generated `.vsdx` output.
+
+For clarity, the debug output distinguishes between:
+- `icon-like shapes`: shapes recognized as icon objects from CSV/JSON metadata or VSDX shape type
+- `embedded image data` / `embedded image icons`: icons that actually carry image bytes in the file and can round-trip as true embedded image objects
 
 Example per-page debug lines:
 
 ```text
-[01] HA: read 41 items/20 lines/6 icons -> out 41 items/20 lines/0 icons
-[27] Page 27: read 0 items/0 lines/0 icons [empty] -> out skipped
+Read icons    : 164 icon-like shapes, 0 with embedded image data
+Output icons  : 0 icon-like shapes, 0 embedded image icons
+[01] HA: read 41 items/20 lines/22 icon-like/0 embedded -> out 41 items/20 lines/0 icon-like/0 embedded
+[27] Page 27: read 0 items/0 lines/0 icon-like/0 embedded [empty] -> out skipped
 ```
+
+If a generated `.vsdx` still imports as blank in Miro, compare it against a
+native Lucid `.vsdx` import and retest with the latest writer first. The most
+recent compatibility update changed the generated XML so page and shape geometry
+is written both as attributes and as element text, and visible shapes now carry
+an explicit rectangle geometry section, which some Visio consumers appear to
+require.
 
 ---
 

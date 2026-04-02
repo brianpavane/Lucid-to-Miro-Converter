@@ -200,12 +200,25 @@ python lucid2miro.py diagram.vsdx --upload --dry-run --summary
   straight connectors in Miro
 - Custom icons are extracted to `<stem>_icons/`; update
   `<stem>_icon_map.json` with hosted URLs and pass `--icon-map` to include them
+- Recent compatibility updates write generated Visio geometry in both forms
+  commonly seen in native `.vsdx` files: `V="..."` attributes and element text
+  content. This is intended to improve Miro compatibility for generated files
+  that previously imported as blank
+- Generated shapes now also include explicit rectangle geometry sections so the
+  output contains visible shape paths, not just transform metadata
 - Generated `.vsdx` output skips empty pages; `--debug-counts` can be used to
   confirm how many pages/tabs and objects were read from the source and written
   to the output file
 - `--debug-counts` also prints a per-page breakdown with page titles and
-  counts for items, lines, and icon-shapes, plus whether a page was skipped
-  on output because it was empty
+  counts for items, lines, and icon diagnostics, plus whether a page was
+  skipped on output because it was empty
+- In debug output, `icon-like` means a shape was recognized as an icon; it does
+  not necessarily mean the file contains embedded image bytes that can round-trip
+  as true image/foreign objects
+- If native Lucid `.vsdx` imports into Miro but generated `.vsdx` does not,
+  retest with the latest version first before comparing counts. The page and
+  object counts can be correct even when the generated package still lacks a
+  compatibility detail required by Miro's importer
 
 ---
 

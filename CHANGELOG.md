@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.12.0] — 2026-04-02
+
+### Changed
+
+- **VSDX writer — improved Miro/Visio compatibility:**
+  - Geometry cells now written in dual form: `V="..."` attribute **and**
+    element text content (e.g. `<PinX V="3.95">3.95</PinX>`) for maximum
+    consumer compatibility
+  - Dual form applied to: `PageWidth`, `PageHeight`, `PinX`, `PinY`,
+    `Width`, `Height`, `LocPinX`, `LocPinY`, connector geometry, and arrow cells
+  - Shape elements now include direct `Cell` entries for all key transform
+    values in addition to the `<XForm>` block
+  - Each shape now includes an explicit rectangle `<Section N="Geometry">`
+    (`MoveTo` + four `LineTo` rows) so shapes have visible geometry for all
+    Visio consumers, including Miro's native Import from Visio flow
+  - Inline `lucid2miro.py` Section 5C updated to match
+- 1 new test; 99 total
+
+### Security
+
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- **No new attack surface:** all changes are string formatting within the
+  existing ZIP/XML writer; no subprocess, exec, eval, or external calls
+- All checks passed
+
 ## [1.11.0] — 2026-04-02
 
 ### Changed
@@ -23,6 +48,10 @@
   - page bounds (`PageWidth`, `PageHeight`)
   - shape geometry (`PinX`, `PinY`, `Width`, `Height`, `LocPinX`, `LocPinY`)
   - connector geometry and arrow cells
+- Generated shape elements now also include:
+  - direct singleton `Cell` entries for key transform values
+  - a simple rectangle `Geometry` section (`MoveTo` + `LineTo` rows) so
+    shapes have explicit visible geometry for Visio consumers
 - Intended to improve compatibility with Miro's native **Import from Visio**
   flow in cases where generated `.vsdx` files previously imported as blank
 - Documentation updated with VSDX import compatibility notes and retest guidance

@@ -952,6 +952,25 @@ class TestVsdxWriter(unittest.TestCase):
             page_xml = zf.read("visio/pages/page1.xml").decode()
         self.assertIn("Hello World", page_xml)
 
+    def test_page_dimensions_in_page_xml(self):
+        import zipfile, io
+        doc = self._simple_doc(1)
+        data = self._write_to_bytes(doc)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            page_xml = zf.read("visio/pages/page1.xml").decode()
+        self.assertIn("<PageWidth", page_xml)
+        self.assertIn("<PageHeight", page_xml)
+
+    def test_shape_geometry_section_in_page_xml(self):
+        import zipfile, io
+        doc = self._simple_doc(1)
+        data = self._write_to_bytes(doc)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            page_xml = zf.read("visio/pages/page1.xml").decode()
+        self.assertIn('<Section N="Geometry"', page_xml)
+        self.assertIn('T="MoveTo"', page_xml)
+        self.assertIn('T="LineTo"', page_xml)
+
     # ── Connectors ────────────────────────────────────────────────────────────
 
     def test_connector_in_page_xml(self):
