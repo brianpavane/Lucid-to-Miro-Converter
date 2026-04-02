@@ -261,11 +261,11 @@ def _connector_xml(
     return shape, connects
 
 
-def _page_xml(page: Page, page_h_in: float) -> str:
+def _page_xml(page: Page, page_w_in: float, page_h_in: float) -> str:
     """Render a full page{n}.xml for one Page.
 
-    A <PageSheet><PageProps><PageHeight> element is included so the parser
-    can read back the correct page height and invert Y coordinates properly.
+    A <PageSheet><PageProps> block is included so consumers can read the page
+    bounds directly, and the parser can still invert Y coordinates properly.
     """
     # Integer ID map: item.id (str) → sequential int starting at 1
     id_map: Dict[str, int] = {it.id: i + 1 for i, it in enumerate(page.items)}
@@ -295,6 +295,7 @@ def _page_xml(page: Page, page_h_in: float) -> str:
     page_sheet = (
         f'<PageSheet xmlns="{ns}" LineStyle="0" FillStyle="0" TextStyle="0">\n'
         f'  <PageProps>\n'
+        f'    <PageWidth V="{page_w_in:.6f}"/>\n'
         f'    <PageHeight V="{page_h_in:.6f}"/>\n'
         f'  </PageProps>\n'
         f'</PageSheet>'
@@ -364,16 +365,21 @@ def write_vsdx(
         zf.writestr("visio/pages/_rels/pages.xml.rels",   _pages_rels(pages))
 
         for idx, page in enumerate(pages):
-            # Page height in inches: bounding box of all items + padding
+            # Page size in inches: bounding box of all items + padding
+            if page.items:
+                max_x_px = max(it.x + it.width for it in page.items)
+            else:
+                max_x_px = 800.0
             if page.items:
                 max_y_px = max(it.y + it.height for it in page.items)
             else:
                 max_y_px = 600.0
+            page_w_in = (max_x_px + CONT_PAD) / DPI
             page_h_in = (max_y_px + CONT_PAD) / DPI
 
             zf.writestr(
                 f"visio/pages/page{idx + 1}.xml",
-                _page_xml(page, page_h_in),
+                _page_xml(page, page_w_in, page_h_in),
             )
 
     data = buf.getvalue()

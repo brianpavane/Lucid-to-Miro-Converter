@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-__version__ = "1.8.0"
+__version__ = "1.9.0"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Data model
@@ -1106,7 +1106,7 @@ def _vw_connector(conn_id: int, line, id_map: dict, item_map: dict, page_h_in: f
     return shape, connects
 
 
-def _vw_page_xml(page, page_h_in: float) -> str:
+def _vw_page_xml(page, page_w_in: float, page_h_in: float) -> str:
     id_map   = {it.id: i+1 for i, it in enumerate(page.items)}
     item_map = {it.id: it   for it in page.items}
     shapes, connects_all = [], []
@@ -1127,6 +1127,7 @@ def _vw_page_xml(page, page_h_in: float) -> str:
     page_sheet = (
         f'<PageSheet xmlns="{ns}" LineStyle="0" FillStyle="0" TextStyle="0">\n'
         f'  <PageProps>\n'
+        f'    <PageWidth V="{page_w_in:.6f}"/>\n'
         f'    <PageHeight V="{page_h_in:.6f}"/>\n'
         f'  </PageProps>\n'
         f'</PageSheet>'
@@ -1155,7 +1156,7 @@ def write_vsdx(doc: Document, dest, has_containment: bool = True, scale: float =
     if not doc.has_coordinates:
         for page in doc.pages:
             if page.items or page.lines:
-                layout_page(page, has_containment)
+                _layout_page(page, has_containment)
     if scale != 1.0:
         for page in doc.pages:
             for item in page.items:
@@ -1174,9 +1175,11 @@ def write_vsdx(doc: Document, dest, has_containment: bool = True, scale: float =
         zf.writestr("visio/pages/pages.xml",            _vw_pages_xml(pages))
         zf.writestr("visio/pages/_rels/pages.xml.rels", _vw_pages_rels(pages))
         for idx, page in enumerate(pages):
+            max_x = max((it.x + it.width for it in page.items), default=800.0)
             max_y = max((it.y + it.height for it in page.items), default=600.0)
+            page_w_in = (max_x + CONT_PAD) / DPI
             page_h_in = (max_y + CONT_PAD) / DPI
-            zf.writestr(f"visio/pages/page{idx+1}.xml", _vw_page_xml(page, page_h_in))
+            zf.writestr(f"visio/pages/page{idx+1}.xml", _vw_page_xml(page, page_w_in, page_h_in))
     data = buf.getvalue()
     if isinstance(dest, (str, Path)):
         out = Path(dest)

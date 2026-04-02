@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.9.0] — 2026-04-02
+
+### Changed
+
+- `vsdx_writer.py`: `_page_xml()` now accepts and writes both `PageWidth` and
+  `PageHeight` in `<PageSheet><PageProps>`, providing full page bounds to
+  consumers (previously only `PageHeight` was written)
+- Version bump to 1.9.0
+
+### Security
+
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- All checks passed (98 tests)
+
 ## [1.8.0] — 2026-04-02
 
 ### Changed
