@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Data model
@@ -577,6 +577,7 @@ def parse_json(source: Union[str, Path, bytes]) -> Document:
 _VSDX_NS  = "http://schemas.microsoft.com/office/visio/2012/main"
 _VSDX_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _DPI      = 96   # pixels per inch
+DPI       = _DPI  # keep writer/parser call sites aligned in the standalone CLI
 
 _VSDX_ARROW: Dict[int, str] = {
     0: "none", 1: "arrow", 2: "filled_triangle", 3: "arrow",

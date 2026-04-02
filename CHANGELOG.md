@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0] — 2026-04-02
+
+### Changed
+
+- Version bump (minor increment)
+- No functional changes
+
+### Security
+
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- All checks passed
+
 ## [1.7.0] — 2026-04-02
 
 ### Added
