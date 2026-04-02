@@ -1,5 +1,120 @@
 # Changelog
 
+## [1.5.0] — 2026-04-02
+
+### Added
+
+- **Visio (.vsdx) input format** — third supported input format alongside CSV and JSON:
+  - `python lucid2miro.py diagram.vsdx`
+  - `python lucid2miro.py diagram.vsdx --upload`
+  - `python lucid2miro.py ./exports/ --format vsdx --output-dir ./miro/`
+  - Parsed using stdlib only (`zipfile` + `xml.etree.ElementTree`; zero new dependencies)
+
+- **Original layout preservation** — VSDX exports carry Visio geometry (`PinX`, `PinY`,
+  `Width`, `Height` in inches).  The parser converts these to Miro pixels at 96 dpi and
+  sets them on each `Item`.  The auto-layout engine is skipped for VSDX input
+  (`Document.has_coordinates = True`), so the Miro board matches the original diagram layout.
+
+- **Embedded icon extraction** — shapes with `Type="Foreign"` (cloud-provider icons, custom
+  SVG/PNG icons) have their raw image bytes stored in `item.image_data`.  On conversion or
+  upload, icons are automatically written to `<stem>_icons/` and a template
+  `<stem>_icon_map.json` is generated.  Update the map with hosted URLs and pass
+  `--icon-map <stem>_icon_map.json` to include icons in the Miro board.
+
+- **Richer per-shape styling** — fill colour and border colour are read directly from Visio
+  Cell values (`FillForegnd`, `LineColor`) and carried through to Miro widgets.
+
+- **Container detection from Visio groups** — group shapes that contain child shapes are
+  automatically treated as containers (rendered with light fill + distinct border).
+
+- **`lucid_to_miro/parser/vsdx_parser.py`** (modular package):
+  - `parse_vsdx(source)` — returns `Document` with `has_coordinates=True`
+  - `extract_media(doc, output_dir)` — writes embedded images, returns `{item_id: Path}`
+
+- **`lucid_to_miro/converter/layout.frame_from_items()`** — computes frame dimensions
+  from pre-set item coordinates (used for VSDX, replaces auto-layout for that path)
+
+- **13 new tests** covering coordinate conversion, connector routing, master name lookup,
+  icon extraction, layout-skip guarantee, and end-to-end conversion (85 total)
+
+### Changed
+
+- `Document` dataclass gains `has_coordinates: bool = False`
+- `Item` dataclass gains `image_data: Optional[bytes] = None` (repr=False)
+- `--format` CLI flag now accepts `csv | json | vsdx`
+- `_parse_file()` dispatches `.vsdx` to `parse_vsdx()`
+- `convert()` and `upload_document()` check `doc.has_coordinates` to skip layout
+
+### Security
+
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- **MEDIUM fixed:** `extract_media()` and `_vextract_media()` now sanitise `item.id`
+  with `re.sub(r"[^\w\-]", "_", item.id)` before constructing the output filename,
+  preventing path traversal if a crafted VSDX encodes `../` sequences in a shape ID
+- **False positive:** scanner flagged `token="your_pat_here"` in `miro_client.py`
+  docstring — this is an example string in documentation, not a hardcoded credential
+- **No new attack surface:** VSDX parsing uses `zipfile.ZipFile` read-only +
+  `xml.etree.ElementTree`; no subprocess, no exec, no eval, no external network calls
+- **Note:** Python's `xml.etree.ElementTree` does not resolve external entities and
+  is not vulnerable to billion-laughs attacks.  For untrusted VSDX files from unknown
+  sources, additional sandboxing is recommended.
+
+## [1.4.0] — 2026-04-02
+
+### Added
+
+- **REST API upload mode (`--upload`)** — upload a Lucidchart diagram directly
+  to a live Miro board without generating an intermediate JSON file.
+  - `--token TOKEN` — Miro Personal Access Token (or `MIRO_TOKEN` env var)
+  - `--team-id TEAM_ID` — target a specific Miro workspace for new boards
+  - `--board-id BOARD_ID` — append content to an existing board
+  - `--board-name NAME` — override the Miro board title
+  - `--frame-prefix PREFIX` / `--frame-suffix SUFFIX` — customize frame names
+    (e.g. `--frame-prefix "Sprint 3: "` → `"Sprint 3: Production VPC"`)
+  - `--icon-map FILE` — JSON file mapping Lucidchart shape IDs/names to image
+    URLs, enabling custom icon restoration
+  - `--access private|view|comment|edit` — board sharing policy (default: private)
+  - `--dry-run` — simulate upload, print what would be created, no API calls
+  - Batch upload: pass a directory with `--format csv|json --upload` to upload
+    all matching files, each to its own new board
+  - Automatic retry on HTTP 429 (rate limit) with `Retry-After` respected, and
+    exponential back-off on transient 5xx errors (up to 3 attempts)
+
+- **`lucid_to_miro/api/` package** (modular counterpart of the inlined code):
+  - `miro_client.py` — zero-dependency `MiroClient` with `get()` / `post()`
+  - `uploader.py` — `upload_document()` function; `load_icon_map()` helper
+
+- **`docs/MIRO_AUTH.md`** — comprehensive authentication guide covering:
+  - Personal Access Token (PAT) setup step-by-step
+  - OAuth 2.0 flow for app integrations
+  - CI/CD setup (GitHub Actions, GitLab CI)
+  - All naming options (board name, frame prefix/suffix)
+  - Custom icon map format and workflow
+  - Troubleshooting for HTTP 401, 403, 429
+
+- **`docs/LUCIDCHART_FORMATS.md`** — full export format comparison covering:
+  - CSV (recommended) — containment hierarchy, multi-tab, auto-layout
+  - JSON — flat/group-based, when acceptable
+  - Visio (.vsdx) — round-trip to Miro via native Visio import
+  - SVG / PDF — static reference boards
+  - Icon handling across all formats
+
+### Changed
+
+- CLI description updated to document both offline and upload modes
+- `--output-dir` flag description now notes it is offline-only
+- `--pretty` flag description notes it is offline-only
+- README restructured: Quick start section, separate offline/upload examples,
+  authentication and format links to new docs
+
+### Security
+
+- Pre-release scan to be performed with `/shannon` before merge to main
+- **No new attack surface:** upload mode uses `urllib.request` (stdlib only);
+  no subprocess, no shell interpolation, no eval, no unsafe deserialization
+- Token is never written to disk or included in output files
+- `--dry-run` allows full validation without transmitting credentials to Miro
+
 ## [1.3.0] — 2026-04-01
 
 ### Added

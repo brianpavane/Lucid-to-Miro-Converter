@@ -639,5 +639,214 @@ class TestCleanNames(unittest.TestCase):
             self.assertEqual(len(out_files), 1)
 
 
+# ─── VSDX parser ─────────────────────────────────────────────────────────────
+
+import io
+import zipfile
+
+from lucid_to_miro.parser.vsdx_parser import parse_vsdx, extract_media
+from lucid_to_miro.converter.layout   import frame_from_items
+
+_VSDX_NS  = "http://schemas.microsoft.com/office/visio/2012/main"
+_VSDX_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _make_vsdx(
+    page_title="Test Page",
+    shapes=None,       # list of (id, master_id, pin_x, pin_y, w, h, text)
+    connects=None,     # list of (conn_id, begin_to, end_to)
+    masters=None,      # list of (id, name_u)
+    page_w=11.0,
+    page_h=8.5,
+) -> bytes:
+    """Build a minimal .vsdx bytes for testing."""
+    if shapes   is None: shapes   = []
+    if connects is None: connects = []
+    if masters  is None: masters  = []
+
+    ns  = _VSDX_NS
+    rel = _VSDX_REL
+    pkg = "http://schemas.openxmlformats.org/package/2006/relationships"
+
+    # masters.xml
+    master_rows = "".join(
+        f'<Master ID="{mid}" NameU="{name}" Name="{name}"/>'
+        for mid, name in masters
+    )
+    masters_xml = f'<?xml version="1.0"?><Masters xmlns="{ns}">{master_rows}</Masters>'
+
+    # page1.xml shapes
+    shape_rows = ""
+    for sid, mid, px, py, w, h, txt in shapes:
+        master_attr = f' Master="{mid}"' if mid else ""
+        shape_rows += (
+            f'<Shape ID="{sid}" Type="Shape"{master_attr}>'
+            f'<XForm>'
+            f'<PinX>{px}</PinX><PinY>{py}</PinY>'
+            f'<Width>{w}</Width><Height>{h}</Height>'
+            f'<LocPinX F="Width*0.5">{w/2}</LocPinX>'
+            f'<LocPinY F="Height*0.5">{h/2}</LocPinY>'
+            f'</XForm>'
+            f'<Text>{txt}</Text>'
+            f'</Shape>'
+        )
+    conn_shapes = "".join(
+        f'<Shape ID="{cid}" Type="Shape"/>' for cid, _, _ in connects
+    )
+    connect_rows = "".join(
+        f'<Connect FromSheet="{cid}" FromCell="BeginX" ToSheet="{beg}" ToCell="PinX"/>'
+        f'<Connect FromSheet="{cid}" FromCell="EndX"   ToSheet="{end}" ToCell="PinX"/>'
+        for cid, beg, end in connects
+    )
+
+    page1_xml = (
+        f'<?xml version="1.0"?>'
+        f'<PageContents xmlns="{ns}" xmlns:r="{rel}">'
+        f'<PageSheet><PageProps>'
+        f'<PageWidth>{page_w}</PageWidth><PageHeight>{page_h}</PageHeight>'
+        f'</PageProps></PageSheet>'
+        f'<Shapes>{shape_rows}{conn_shapes}</Shapes>'
+        f'<Connects>{connect_rows}</Connects>'
+        f'</PageContents>'
+    )
+
+    pages_xml = (
+        f'<?xml version="1.0"?>'
+        f'<Pages xmlns="{ns}" xmlns:r="{rel}">'
+        f'<Page ID="1" Name="{page_title}"><Rel r:id="rId1"/></Page>'
+        f'</Pages>'
+    )
+    pages_rels = (
+        f'<?xml version="1.0"?>'
+        f'<Relationships xmlns="{pkg}">'
+        f'<Relationship Id="rId1" Type="http://schemas.microsoft.com/visio/2010/relationships/page" Target="page1.xml"/>'
+        f'</Relationships>'
+    )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("visio/pages/pages.xml", pages_xml)
+        zf.writestr("visio/pages/_rels/pages.xml.rels", pages_rels)
+        zf.writestr("visio/pages/page1.xml", page1_xml)
+        zf.writestr("visio/masters/masters.xml", masters_xml)
+    return buf.getvalue()
+
+
+class TestVsdxParser(unittest.TestCase):
+
+    def test_has_coordinates_flag(self):
+        vsdx = _make_vsdx(shapes=[(1, "", 2, 6, 1, 0.5, "A")])
+        doc  = parse_vsdx(vsdx)
+        self.assertTrue(doc.has_coordinates)
+
+    def test_page_title(self):
+        vsdx = _make_vsdx(page_title="My Diagram",
+                          shapes=[(1, "", 1, 1, 1, 1, "X")])
+        doc  = parse_vsdx(vsdx)
+        self.assertEqual(doc.pages[0].title, "My Diagram")
+
+    def test_shape_count(self):
+        shapes = [(i, "", float(i), 4.0, 1.0, 0.5, f"S{i}") for i in range(1, 5)]
+        doc    = parse_vsdx(_make_vsdx(shapes=shapes))
+        self.assertEqual(len(doc.pages[0].items), 4)
+
+    def test_coordinate_conversion(self):
+        # PinX=2, PinY=6.5, W=1.5, H=0.75  on page H=8.5
+        # tl_x = (2 - 0.75) * 96 = 120
+        # tl_y = (8.5 - (6.5 - 0.375) - 0.75) * 96 = (8.5 - 6.875) * 96 = 156
+        shapes = [(1, "", 2.0, 6.5, 1.5, 0.75, "Box")]
+        doc    = parse_vsdx(_make_vsdx(shapes=shapes))
+        item   = doc.pages[0].items[0]
+        self.assertAlmostEqual(item.x,      120, delta=2)
+        self.assertAlmostEqual(item.y,      156, delta=2)
+        self.assertAlmostEqual(item.width,  144, delta=2)
+        self.assertAlmostEqual(item.height,  72, delta=2)
+
+    def test_connectors_become_lines(self):
+        shapes   = [(1, "", 1.0, 4.0, 1.0, 0.5, "A"),
+                    (2, "", 4.0, 4.0, 1.0, 0.5, "B")]
+        connects = [(10, "1", "2")]
+        doc      = parse_vsdx(_make_vsdx(shapes=shapes, connects=connects))
+        page     = doc.pages[0]
+        self.assertEqual(len(page.items), 2)
+        self.assertEqual(len(page.lines), 1)
+        self.assertEqual(page.lines[0].source_id, "1_1")
+        self.assertEqual(page.lines[0].target_id, "1_2")
+
+    def test_connector_excluded_from_items(self):
+        shapes   = [(1, "", 1.0, 4.0, 1.0, 0.5, "A"),
+                    (2, "", 4.0, 4.0, 1.0, 0.5, "B")]
+        connects = [(99, "1", "2")]
+        doc      = parse_vsdx(_make_vsdx(shapes=shapes, connects=connects))
+        item_ids = {i.id for i in doc.pages[0].items}
+        self.assertNotIn("1_99", item_ids)
+
+    def test_master_name_used(self):
+        masters = [("5", "Cylinder")]
+        shapes  = [(1, "5", 3.0, 4.0, 1.0, 1.0, "DB")]
+        doc     = parse_vsdx(_make_vsdx(shapes=shapes, masters=masters))
+        self.assertEqual(doc.pages[0].items[0].name, "Cylinder")
+
+    def test_shape_text_extracted(self):
+        shapes = [(1, "", 2.0, 4.0, 1.0, 0.5, "Hello World")]
+        doc    = parse_vsdx(_make_vsdx(shapes=shapes))
+        self.assertEqual(doc.pages[0].items[0].text, "Hello World")
+
+    def test_empty_page_excluded(self):
+        """A page with no shapes and no lines must not appear in doc.pages."""
+        vsdx = _make_vsdx(shapes=[])
+        doc  = parse_vsdx(vsdx)
+        self.assertEqual(len(doc.pages), 0)
+
+    def test_frame_from_items(self):
+        shapes = [(1, "", 1.0, 7.5, 1.0, 0.5, "A"),
+                  (2, "", 5.0, 5.0, 2.0, 1.0, "B")]
+        doc    = parse_vsdx(_make_vsdx(shapes=shapes))
+        page   = doc.pages[0]
+        fw, fh = frame_from_items(page)
+        # max_x = max(item.x + item.width for item in page.items) + CONT_PAD
+        max_x = max(i.x + i.width  for i in page.items)
+        max_y = max(i.y + i.height for i in page.items)
+        self.assertGreaterEqual(fw, max_x)
+        self.assertGreaterEqual(fh, max_y)
+
+    def test_convert_skips_layout(self):
+        """convert() must not overwrite VSDX coordinates with auto-layout."""
+        shapes = [(1, "", 2.0, 6.5, 1.5, 0.75, "Box")]
+        doc    = parse_vsdx(_make_vsdx(shapes=shapes))
+        item   = doc.pages[0].items[0]
+        orig_x, orig_y = item.x, item.y
+        board  = convert(doc, has_containment=True)
+        # Re-check same item — x/y should be unchanged after convert()
+        self.assertAlmostEqual(item.x, orig_x, delta=2)
+        self.assertAlmostEqual(item.y, orig_y, delta=2)
+
+    def test_convert_produces_frame_and_shape(self):
+        shapes = [(1, "", 2.0, 6.5, 1.5, 0.75, "Node")]
+        doc    = parse_vsdx(_make_vsdx(shapes=shapes))
+        board  = convert(doc, has_containment=True)
+        widgets = board["board"]["widgets"]
+        self.assertEqual(sum(1 for w in widgets if w["type"] == "frame"), 1)
+        self.assertEqual(sum(1 for w in widgets if w["type"] == "shape"), 1)
+
+    def test_extract_media_writes_files(self):
+        """extract_media() writes image_data bytes to disk."""
+        import tempfile
+        # Build a shape with embedded PNG-ish image data
+        png_header = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+        shapes = [(1, "", 2.0, 6.5, 1.5, 0.75, "Icon")]
+        doc    = parse_vsdx(_make_vsdx(shapes=shapes))
+        # Manually inject image_data
+        doc.pages[0].items[0].is_icon   = True
+        doc.pages[0].items[0].image_data = png_header
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            written = extract_media(doc, tmpdir)
+            self.assertEqual(len(written), 1)
+            path = list(written.values())[0]
+            self.assertTrue(path.exists())
+            self.assertEqual(path.read_bytes(), png_header)
+
+
 if __name__ == "__main__":
     unittest.main()

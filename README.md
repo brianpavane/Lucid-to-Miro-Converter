@@ -2,7 +2,8 @@
 
 [![Release](https://img.shields.io/github/v/release/brianpavane/Lucid-to-Miro-Converter)](https://github.com/brianpavane/Lucid-to-Miro-Converter/releases/latest)
 
-Convert Lucidchart exports to Miro-importable JSON.
+Convert Lucidchart exports to Miro — either as local JSON files or by uploading
+directly to a Miro board via the REST API.
 
 **Requires:** Python 3.8+ — no third-party packages needed. Works on macOS, Windows, and Linux.
 
@@ -11,6 +12,12 @@ Convert Lucidchart exports to Miro-importable JSON.
 |--------|-------------------------------|
 | `.csv`  | File → Export → CSV  |
 | `.json` | File → Export → JSON |
+
+**Two output modes:**
+| Mode | When to use |
+|------|-------------|
+| **Offline JSON** *(default)* | Generate a local `.miro.json` file for manual import or scripting |
+| **REST API upload** (`--upload`) | Create a live Miro board directly from the command line |
 
 ---
 
@@ -51,81 +58,144 @@ cd Lucid-to-Miro-Converter
 
 ---
 
+## Quick start
+
+### Offline JSON output (no Miro account needed)
+
+```bash
+python lucid2miro.py diagram.csv           # → diagram.miro.json
+python lucid2miro.py diagram.json -o board.json --pretty --summary
+python lucid2miro.py ./exports/ --format csv --output-dir ./miro/
+```
+
+### REST API upload (direct to Miro)
+
+```bash
+# 1. Get a Personal Access Token from Miro (see docs/MIRO_AUTH.md)
+export MIRO_TOKEN=your_token_here
+
+# 2. Upload — creates a new board automatically
+python lucid2miro.py diagram.csv --upload
+
+# 3. Preview without uploading
+python lucid2miro.py diagram.csv --upload --dry-run --summary
+```
+
+---
+
 ## Usage
 
 ```bash
-# Single file
+# Single file (offline)
 python lucid2miro.py <input.csv|json> [options]
 
-# Batch — convert every .csv (or .json) in a folder
+# Batch (offline)
 python lucid2miro.py <input-dir/> --format csv|json [--output-dir <dir/>] [options]
+
+# Single file (upload)
+python lucid2miro.py <input.csv|json> --upload [upload-options]
+
+# Batch (upload)
+python lucid2miro.py <input-dir/> --format csv|json --upload [upload-options]
 ```
 
-### Options
-
-**Batch flags** (only when `input` is a directory):
+### Shared flags
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--format csv\|json` | File type to convert *(required)* | — |
-| `--output-dir DIR` | Directory for converted files | Input directory |
-
-**Single-file & shared flags:**
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-o, --output FILE` | Output path *(single-file only)* | `<input>.miro.json` |
-| `-t, --title TITLE` | Miro board title | Title from source file |
+| `-t, --title TITLE` | Board title | Title from source file |
 | `-s, --scale N` | Uniform coordinate scale factor | `1.0` |
-| `--pretty` | Pretty-print output JSON | off |
-| `--summary` | Print conversion stats (per file in batch) | off |
-| `--pages N[,N]` | Page titles or 1-based indices to include *(single-file only)* | all |
-| `--clean-names` | Name outputs `<stem>.json` instead of `<stem>.miro.json` — requires `--output-dir` to differ from input dir in batch mode | off |
+| `--summary` | Print conversion / upload stats | off |
+| `--pages N[,N]` | Page titles or 1-based indices to include | all |
 | `--version` | Print version and exit | — |
 
-### Single-file examples
+### Offline-only flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--format csv\|json` | *(Batch)* File type to convert *(required)* | — |
+| `--output-dir DIR` | *(Batch)* Directory for converted files | Input directory |
+| `-o, --output FILE` | *(Single)* Output file path | `<input>.miro.json` |
+| `--pretty` | Pretty-print output JSON | off |
+| `--clean-names` | Output `<stem>.json` instead of `<stem>.miro.json` | off |
+
+### Upload flags (`--upload` mode)
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--upload` | Upload directly to Miro via REST API | off |
+| `--token TOKEN` | Miro Personal Access Token | `MIRO_TOKEN` env var |
+| `--team-id TEAM_ID` | Miro team/workspace for new boards | token default |
+| `--board-id BOARD_ID` | Upload into an existing board | create new |
+| `--board-name NAME` | Override board title | source title |
+| `--frame-prefix PREFIX` | Prepend text to each frame name | `""` |
+| `--frame-suffix SUFFIX` | Append text to each frame name | `""` |
+| `--icon-map FILE` | JSON file mapping shape IDs/names to image URLs | none |
+| `--access private\|view\|comment\|edit` | Sharing policy for new boards | `private` |
+| `--dry-run` | Simulate upload without API calls | off |
+
+### Naming options (upload mode)
+
+Control how the board and frames are named:
+
+```bash
+# Custom board name
+python lucid2miro.py diagram.csv --upload --board-name "Q3 Architecture"
+
+# Add a prefix to every frame (tab → frame)
+python lucid2miro.py diagram.csv --upload --frame-prefix "Sprint 3: "
+# → "Sprint 3: Production VPC", "Sprint 3: Staging", ...
+
+# Combine prefix and suffix
+python lucid2miro.py diagram.csv --upload \
+  --frame-prefix "2026 " --frame-suffix " [Draft]"
+# → "2026 Production VPC [Draft]"
+```
+
+### Offline examples
 
 ```bash
 # Basic conversion
 python lucid2miro.py diagram.csv
 
-# Custom title, pretty output, and per-page summary
+# Custom title, pretty output, summary
 python lucid2miro.py diagram.csv -t "My Architecture" --pretty --summary
 
 # Specific pages by title
 python lucid2miro.py diagram.json --pages "HA,Forwarding Rules"
 
-# Specific pages by index, scaled up
-python lucid2miro.py diagram.csv --pages "1,3" --scale 1.5
-
-# Explicit output path
-python lucid2miro.py diagram.csv -o ~/Desktop/board.json --pretty
-```
-
-### Batch examples
-
-```bash
-# Convert all CSVs in ./exports/ → ./miro/  (outputs: diagram.miro.json)
+# Batch — all CSVs in ./exports/ → ./miro/
 python lucid2miro.py ./exports/ --format csv --output-dir ./miro/
 
-# Clean output names — same stem, just .json  (outputs: diagram.json)
+# Clean output names (diagram.csv → diagram.json)
 python lucid2miro.py ./exports/ --format csv --output-dir ./miro/ --clean-names
-
-# Convert all JSONs with per-file summaries
-python lucid2miro.py ./exports/ --format json --output-dir ./miro/ --summary
-
-# Output defaults to same folder as input files
-python lucid2miro.py ./exports/ --format csv --scale 1.5 --pretty
 ```
 
-**Output filenames:**
+### Upload examples
 
-| Mode | Output name |
-|------|-------------|
-| Default | `diagram.csv` → `diagram.miro.json` |
-| `--clean-names` | `diagram.csv` → `diagram.json` |
+```bash
+# Upload a single diagram (creates new board)
+python lucid2miro.py diagram.csv --upload
 
-`--clean-names` requires `--output-dir` to point to a **different** directory than the input — the converter will refuse if they are the same to prevent source files from being overwritten.
+# Upload to an existing board
+python lucid2miro.py diagram.csv --upload --board-id uXjVPabc1234=
+
+# Name the board and frames
+python lucid2miro.py diagram.csv --upload \
+  --board-name "Prod Infrastructure" \
+  --frame-prefix "Env: "
+
+# Batch upload all CSVs in ./exports/
+python lucid2miro.py ./exports/ --format csv --upload --summary
+
+# Dry run — see what would be created without calling the API
+python lucid2miro.py diagram.csv --upload --dry-run --summary
+
+# With custom icons
+python lucid2miro.py diagram.csv --upload --icon-map icon-map.json
+```
+
+**`--clean-names`** requires `--output-dir` to point to a **different** directory than the input to prevent source files from being overwritten.
 
 The output directory is created automatically (including nested paths) if it does not exist.
 
@@ -234,6 +304,30 @@ pip install pytest && pytest tests/ -v
 
 ---
 
+## Authentication
+
+See **[docs/MIRO_AUTH.md](docs/MIRO_AUTH.md)** for the full guide covering:
+
+- Creating a Personal Access Token (PAT) — step-by-step
+- OAuth 2.0 for app integrations
+- CI/CD setup (GitHub Actions, GitLab)
+- Naming options (board name, frame prefix/suffix)
+- Custom icon mapping
+- Troubleshooting (401, 403, 429)
+
+---
+
+## LucidChart export formats
+
+See **[docs/LUCIDCHART_FORMATS.md](docs/LUCIDCHART_FORMATS.md)** for a full comparison of:
+
+- **CSV** — recommended; preserves containment hierarchy for nested layout
+- **JSON** — flat only; use for simple diagrams without containers
+- **Visio (.vsdx)** — editable shapes via Miro's native Visio import
+- **SVG / PDF** — static reference boards
+
+---
+
 ## Project structure
 
 ```
@@ -244,10 +338,17 @@ lucid_to_miro/            ← importable package (same logic, modular layout)
 ├── parser/
 │   ├── csv_parser.py
 │   └── json_parser.py
-└── converter/
-    ├── miro.py
-    ├── shape_map.py
-    └── layout.py
+├── converter/
+│   ├── miro.py
+│   ├── shape_map.py
+│   └── layout.py
+└── api/                  ← REST API client and uploader (new in v1.4.0)
+    ├── miro_client.py
+    └── uploader.py
+
+docs/
+├── MIRO_AUTH.md          ← Authentication guide + naming options
+└── LUCIDCHART_FORMATS.md ← Export format comparison
 
 tests/
 ├── test_converter.py     62 unit + integration tests

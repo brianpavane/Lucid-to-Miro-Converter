@@ -20,7 +20,7 @@ import re
 from typing import Any
 
 from lucid_to_miro.model import Document, Page, Item, Line
-from lucid_to_miro.converter.layout import layout_page, FRAME_GAP
+from lucid_to_miro.converter.layout import layout_page, frame_from_items, FRAME_GAP
 from lucid_to_miro.converter.shape_map import to_miro_shape, is_text_only, is_icon
 
 # Colours for auto-generated container fills (cycled per nesting depth)
@@ -190,7 +190,12 @@ def convert(doc: Document, has_containment: bool = True,
             continue
 
         # ── Layout ──────────────────────────────────────────────────────────
-        frame_w, frame_h = layout_page(page, has_containment)
+        # VSDX input: coordinates already set by parser — just compute frame size.
+        # CSV / JSON input: run the auto-layout engine.
+        if doc.has_coordinates:
+            frame_w, frame_h = frame_from_items(page)
+        else:
+            frame_w, frame_h = layout_page(page, has_containment)
 
         if scale != 1.0:
             frame_w *= scale
