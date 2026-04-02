@@ -252,7 +252,7 @@ def layout_json_page(page: Page) -> tuple[float, float]:
     return max(frame_w, 400), max(frame_h, 300)
 
 
-# ── Public entry point ────────────────────────────────────────────────────────
+# ── Public entry points ───────────────────────────────────────────────────────
 
 def layout_page(page: Page, has_containment: bool) -> tuple[float, float]:
     """
@@ -266,3 +266,17 @@ def layout_page(page: Page, has_containment: bool) -> tuple[float, float]:
     if has_containment:
         return layout_csv_page(page)
     return layout_json_page(page)
+
+
+def frame_from_items(page: Page) -> tuple[float, float]:
+    """
+    Compute frame dimensions from items that already have coordinates set
+    (i.e. when Document.has_coordinates is True, e.g. VSDX input).
+
+    Returns (frame_width, frame_height) with CONT_PAD padding on each side.
+    """
+    if not page.items:
+        return 800.0, 600.0
+    max_x = max(item.x + item.width  for item in page.items)
+    max_y = max(item.y + item.height for item in page.items)
+    return max(max_x + CONT_PAD, 400.0), max(max_y + CONT_PAD, 300.0)

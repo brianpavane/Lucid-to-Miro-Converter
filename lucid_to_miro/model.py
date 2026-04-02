@@ -37,11 +37,13 @@ class Item:
     is_container: bool = False        # True for region/VPC/swimlane shapes
     is_icon: bool = False             # SVGPathBlock2 / image shapes
     style: Style = field(default_factory=Style)
-    # Filled by layout engine:
+    # Filled by layout engine (CSV/JSON) or VSDX parser (actual coordinates):
     x: float = 0
     y: float = 0
     width: float = 0
     height: float = 0
+    # VSDX only — raw embedded image bytes (None for CSV/JSON):
+    image_data: Optional[bytes] = field(default=None, repr=False)
 
 
 @dataclass
@@ -67,3 +69,6 @@ class Page:
 class Document:
     title: str
     pages: List[Page] = field(default_factory=list)
+    # True when a parser has already set item x/y/width/height (e.g. VSDX).
+    # When True, the layout engine is skipped and coordinates are used as-is.
+    has_coordinates: bool = False
