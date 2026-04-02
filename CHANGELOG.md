@@ -1,5 +1,62 @@
 # Changelog
 
+## [1.7.0] — 2026-04-02
+
+### Added
+
+- **VSDX writer — `--output-format vsdx`** — converts any LucidChart export
+  (`.vsdx`, `.csv`, `.json`) to a `.vsdx` Visio file that can be imported
+  into Miro via **"Import from Visio"** with no REST API or token required:
+  ```bash
+  python lucid2miro.py diagram.vsdx --output-format vsdx  # layout preserved
+  python lucid2miro.py diagram.csv  --output-format vsdx  # auto-layout → VSDX
+  python lucid2miro.py diagram.json --output-format vsdx  # auto-layout → VSDX
+  python lucid2miro.py ./exports/ --format csv --output-format vsdx --output-dir ./out/
+  ```
+  - Produces a valid OPC/ZIP archive with all required parts
+    (`[Content_Types].xml`, `_rels/`, `visio/document.xml`,
+    `visio/pages/pages.xml`, `visio/pages/page{n}.xml`)
+  - Each LucidChart page → a Visio page (imported as a Miro frame)
+  - Geometry written in `<XForm>` with element-name cells so the Visio
+    schema and the round-trip parser agree on coordinate interpretation
+  - `<PageSheet><PageProps><PageHeight>` written per page so Y-axis
+    inversion is correct on re-import
+  - Connector shapes written as `Type="Edge"` with `<Connects>` topology
+  - Per-shape fill and border colours preserved in `Cell/@N` attributes
+  - Text labels preserved in `<Text>` child elements
+  - Empty pages (no items, no lines) excluded from the output archive
+
+- **`lucid_to_miro/converter/vsdx_writer.py`** (modular package):
+  - `write_vsdx(doc, dest, has_containment, scale)` — public API
+  - Runs auto-layout (CSV/JSON) or skips it (VSDX passthrough)
+  - `dest` accepts `str`, `Path`, or a writable binary `IO` object
+
+- **12 new tests** (`TestVsdxWriter`) covering ZIP validity, OPC members,
+  multi-page, page titles, coordinate round-trip (write → parse → compare),
+  text content, connectors with `<Connect>` elements, CSV layout integration,
+  scale factor, file-path output, and empty-page exclusion (97 total)
+
+### Changed
+
+- CLI `--output-format json|vsdx` flag added (default: `json`); controls
+  whether offline output is a Miro JSON file or a Visio `.vsdx` file
+- `_convert_file()` branches on `output_format`; VSDX path calls `write_vsdx()`
+- Single-file mode: when `--output-format vsdx` and input is already `.vsdx`,
+  output is written as `<stem>_converted.vsdx` to avoid overwriting the source
+- Batch mode: `--output-format vsdx` produces `.vsdx` output files
+- CLI epilog updated with VSDX output examples
+- `--pretty` flag described as JSON-only in help text
+- `lucid_to_miro/converter/__init__.py` now exports `write_vsdx`
+
+### Security
+
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- **No new attack surface:** writer uses `zipfile.ZipFile` write-only +
+  string formatting; no subprocess, no exec, no eval, no external calls
+- Output filenames are derived from `page.title` values which are XML-escaped
+  with `_esc()` before inclusion in the archive
+- All other checks passed
+
 ## [1.6.0] — 2026-04-02
 
 ### Changed

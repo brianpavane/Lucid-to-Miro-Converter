@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Data model
@@ -939,6 +939,253 @@ def _vextract_media(doc: Document, output_dir: Path) -> Dict[str, Path]:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# SECTION 5C — Visio (.vsdx) writer
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Converts a normalised Document back into a .vsdx (OPC/ZIP) archive so it
+# can be imported into Miro via "Import from Visio" (no REST API needed).
+#
+# Coordinate conversion (inverse of the parser):
+#   PinX    = (item.x + item.width  / 2) / 96
+#   PinY    = page_height_in − (item.y + item.height / 2) / 96
+#   Width   = item.width  / 96
+#   Height  = item.height / 96
+#   LocPinX = Width  / 2
+#   LocPinY = Height / 2
+
+_VSDXW_CT_RELS   = "application/vnd.openxmlformats-package.relationships+xml"
+_VSDXW_CT_DOC    = "application/vnd.ms-visio.drawing.main+xml"
+_VSDXW_CT_PAGES  = "application/vnd.ms-visio.pages+xml"
+_VSDXW_CT_PAGE   = "application/vnd.ms-visio.page+xml"
+_VSDXW_NS_VISIO  = "http://schemas.microsoft.com/office/visio/2012/main"
+_VSDXW_NS_REL    = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_VSDXW_NS_PKG    = "http://schemas.openxmlformats.org/package/2006/relationships"
+_VSDXW_RT_DOC    = "http://schemas.microsoft.com/visio/2010/relationships/document"
+_VSDXW_RT_PAGES  = "http://schemas.microsoft.com/visio/2010/relationships/pages"
+_VSDXW_RT_PAGE   = "http://schemas.microsoft.com/visio/2010/relationships/page"
+
+_VSDXW_ARROW_OUT: Dict[str, int] = {
+    "none": 0, "arrow": 1, "filled_triangle": 2, "open_arrow": 3,
+    "circle": 5, "open_diamond": 13, "filled_diamond": 14,
+}
+
+
+def _vw_esc(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _vw_colour(raw: str) -> str:
+    import re as _re
+    if raw and _re.match(r"^#[0-9a-fA-F]{6}$", raw):
+        return raw.lower()
+    return "#ffffff"
+
+
+def _vw_content_types(n: int) -> str:
+    ov = "\n".join(
+        f'  <Override PartName="/visio/pages/page{i+1}.xml" ContentType="{_VSDXW_CT_PAGE}"/>'
+        for i in range(n)
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+        f'  <Default Extension="rels" ContentType="{_VSDXW_CT_RELS}"/>\n'
+        '  <Default Extension="xml" ContentType="application/xml"/>\n'
+        f'  <Override PartName="/visio/document.xml" ContentType="{_VSDXW_CT_DOC}"/>\n'
+        f'  <Override PartName="/visio/pages/pages.xml" ContentType="{_VSDXW_CT_PAGES}"/>\n'
+        f'{ov}\n</Types>'
+    )
+
+
+def _vw_root_rels() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Relationships xmlns="{_VSDXW_NS_PKG}">\n'
+        f'  <Relationship Id="rId1" Type="{_VSDXW_RT_DOC}" Target="visio/document.xml"/>\n'
+        '</Relationships>'
+    )
+
+
+def _vw_document_rels() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Relationships xmlns="{_VSDXW_NS_PKG}">\n'
+        f'  <Relationship Id="rId1" Type="{_VSDXW_RT_PAGES}" Target="pages/pages.xml"/>\n'
+        '</Relationships>'
+    )
+
+
+def _vw_pages_xml(pages: list) -> str:
+    entries = []
+    for i, page in enumerate(pages):
+        name = _vw_esc(page.title or f"Page-{i+1}")
+        entries.append(
+            f'  <Page ID="{i+1}" NameU="{name}" IsCustomNameU="1" Name="{name}" IsCustomName="1">\n'
+            f'    <Rel r:id="rId{i+1}" xmlns:r="{_VSDXW_NS_REL}"/>\n'
+            f'  </Page>'
+        )
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<Pages xmlns="{_VSDXW_NS_VISIO}">\n'
+        + "\n".join(entries) + "\n</Pages>"
+    )
+
+
+def _vw_pages_rels(pages: list) -> str:
+    rows = "\n".join(
+        f'  <Relationship Id="rId{i+1}" Type="{_VSDXW_RT_PAGE}" Target="page{i+1}.xml"/>'
+        for i in range(len(pages))
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Relationships xmlns="{_VSDXW_NS_PKG}">\n{rows}\n</Relationships>'
+    )
+
+
+def _vw_shape(int_id: int, item, page_h_in: float) -> str:
+    # Geometry in <XForm> with element-name tags (parser uses _find_float(xform, "Width"...))
+    # Colour cells use Cell/@N (parser uses _cell_value(shape, "FillForegnd"))
+    w_in  = max(item.width,  1.0) / DPI
+    h_in  = max(item.height, 1.0) / DPI
+    pin_x = (item.x + item.width  / 2.0) / DPI
+    pin_y = page_h_in - (item.y + item.height / 2.0) / DPI
+    fill  = _vw_colour(item.style.fill_color)
+    lc    = _vw_colour(item.style.stroke_color)
+    label = _vw_esc(item.text or "")
+    te    = f"\n  <Text>{label}</Text>" if label else ""
+    ns = _VSDXW_NS_VISIO
+    return (
+        f'<Shape ID="{int_id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">\n'
+        f'  <XForm xmlns="{ns}">\n'
+        f'    <PinX V="{pin_x:.6f}"/>\n'
+        f'    <PinY V="{pin_y:.6f}"/>\n'
+        f'    <Width V="{w_in:.6f}"/>\n'
+        f'    <Height V="{h_in:.6f}"/>\n'
+        f'    <LocPinX V="{w_in/2:.6f}" F="Width*0.5"/>\n'
+        f'    <LocPinY V="{h_in/2:.6f}" F="Height*0.5"/>\n'
+        f'  </XForm>\n'
+        f'  <Cell N="FillForegnd" V="{fill}"/>\n'
+        f'  <Cell N="LineColor"   V="{lc}"/>{te}\n'
+        '</Shape>'
+    )
+
+
+def _vw_connector(conn_id: int, line, id_map: dict, item_map: dict, page_h_in: float):
+    def _ctr(it):
+        return (it.x + it.width/2.0)/DPI, page_h_in - (it.y + it.height/2.0)/DPI
+    src = item_map.get(line.source_id) if line.source_id else None
+    tgt = item_map.get(line.target_id) if line.target_id else None
+    bx, by = _ctr(src) if src else (1.0, page_h_in/2.0)
+    ex, ey = _ctr(tgt) if tgt else (2.0, page_h_in/2.0)
+    ba = _VSDXW_ARROW_OUT.get(line.source_arrow, 0)
+    ea = _VSDXW_ARROW_OUT.get(line.target_arrow, 1)
+    label = _vw_esc(line.text or "")
+    te = f"\n  <Text>{label}</Text>" if label else ""
+    shape = (
+        f'<Shape ID="{conn_id}" Type="Edge" LineStyle="0" FillStyle="0" TextStyle="0">\n'
+        f'  <Cell N="BeginX"     V="{bx:.6f}"/>\n'
+        f'  <Cell N="BeginY"     V="{by:.6f}"/>\n'
+        f'  <Cell N="EndX"       V="{ex:.6f}"/>\n'
+        f'  <Cell N="EndY"       V="{ey:.6f}"/>\n'
+        f'  <Cell N="BeginArrow" V="{ba}"/>\n'
+        f'  <Cell N="EndArrow"   V="{ea}"/>{te}\n'
+        '</Shape>'
+    )
+    connects = []
+    if src and line.source_id in id_map:
+        connects.append(
+            f'<Connect FromSheet="{conn_id}" ToSheet="{id_map[line.source_id]}"'
+            ' FromCell="BeginX" ToCell="PinX"/>'
+        )
+    if tgt and line.target_id in id_map:
+        connects.append(
+            f'<Connect FromSheet="{conn_id}" ToSheet="{id_map[line.target_id]}"'
+            ' FromCell="EndX" ToCell="PinX"/>'
+        )
+    return shape, connects
+
+
+def _vw_page_xml(page, page_h_in: float) -> str:
+    id_map   = {it.id: i+1 for i, it in enumerate(page.items)}
+    item_map = {it.id: it   for it in page.items}
+    shapes, connects_all = [], []
+    nid = len(page.items) + 1
+    for item in page.items:
+        shapes.append(_vw_shape(id_map[item.id], item, page_h_in))
+    for line in page.lines:
+        s, cs = _vw_connector(nid, line, id_map, item_map, page_h_in)
+        shapes.append(s)
+        connects_all.extend(cs)
+        nid += 1
+    pad = "  "
+    sbody = "\n".join(f"{pad}{s}" for s in shapes)
+    cbody = ""
+    if connects_all:
+        cbody = "\n<Connects>\n" + "\n".join(f"{pad}{c}" for c in connects_all) + "\n</Connects>"
+    ns = _VSDXW_NS_VISIO
+    page_sheet = (
+        f'<PageSheet xmlns="{ns}" LineStyle="0" FillStyle="0" TextStyle="0">\n'
+        f'  <PageProps>\n'
+        f'    <PageHeight V="{page_h_in:.6f}"/>\n'
+        f'  </PageProps>\n'
+        f'</PageSheet>'
+    )
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<PageContents xmlns="{_VSDXW_NS_VISIO}" xmlns:r="{_VSDXW_NS_REL}">\n'
+        f'{page_sheet}\n'
+        f'<Shapes>\n{sbody}\n</Shapes>{cbody}\n</PageContents>'
+    )
+
+
+def write_vsdx(doc: Document, dest, has_containment: bool = True, scale: float = 1.0) -> None:
+    """
+    Convert a normalised Document to a .vsdx file.
+
+    Accepts CSV, JSON, or VSDX input.  If coordinates are not pre-set
+    (CSV / JSON), the auto-layout engine runs first.
+
+    Args:
+        doc:             Parsed document.
+        dest:            Output file path (str / Path) or writable binary IO.
+        has_containment: True for CSV (parent_id set); False for JSON.
+        scale:           Uniform scale factor.
+    """
+    if not doc.has_coordinates:
+        for page in doc.pages:
+            if page.items or page.lines:
+                layout_page(page, has_containment)
+    if scale != 1.0:
+        for page in doc.pages:
+            for item in page.items:
+                item.x *= scale; item.y *= scale
+                item.width *= scale; item.height *= scale
+
+    pages = [p for p in doc.pages if p.items or p.lines]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml",             _vw_content_types(len(pages)))
+        zf.writestr("_rels/.rels",                      _vw_root_rels())
+        zf.writestr("visio/document.xml",
+                    '<?xml version="1.0" encoding="utf-8"?>\n'
+                    f'<VisioDocument xmlns="{_VSDXW_NS_VISIO}"/>')
+        zf.writestr("visio/_rels/document.xml.rels",    _vw_document_rels())
+        zf.writestr("visio/pages/pages.xml",            _vw_pages_xml(pages))
+        zf.writestr("visio/pages/_rels/pages.xml.rels", _vw_pages_rels(pages))
+        for idx, page in enumerate(pages):
+            max_y = max((it.y + it.height for it in page.items), default=600.0)
+            page_h_in = (max_y + CONT_PAD) / DPI
+            zf.writestr(f"visio/pages/page{idx+1}.xml", _vw_page_xml(page, page_h_in))
+    data = buf.getvalue()
+    if isinstance(dest, (str, Path)):
+        out = Path(dest)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(data)
+    else:
+        dest.write(data)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # SECTION 6 — Miro JSON converter
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -1485,27 +1732,31 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="lucid2miro",
         description=(
-            "Convert Lucidchart .json or .csv exports to Miro JSON, "
+            "Convert Lucidchart exports (.vsdx, .csv, .json) to Miro JSON or Visio (.vsdx), "
             "or upload directly to Miro via the REST API."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Offline VSDX output (no Miro account — import via Miro "Import from Visio"):
+  python lucid2miro.py diagram.vsdx --output-format vsdx   # passthrough: preserves layout
+  python lucid2miro.py diagram.csv  --output-format vsdx   # CSV → VSDX (auto-layout)
+  python lucid2miro.py diagram.json --output-format vsdx   # JSON → VSDX (auto-layout)
+  python lucid2miro.py ./exports/ --format csv --output-format vsdx --output-dir ./out/
+
 Offline JSON output (default):
+  python lucid2miro.py diagram.vsdx
   python lucid2miro.py diagram.csv
   python lucid2miro.py diagram.json -o board.json --pretty --summary
   python lucid2miro.py diagram.csv -t "My Board" --scale 1.5 --pages "HA,VPC"
-
-Batch JSON output:
-  python lucid2miro.py ./exports/ --format csv --output-dir ./miro/
-  python lucid2miro.py ./exports/ --format json --output-dir ./miro/ --summary
+  python lucid2miro.py ./exports/ --format vsdx --output-dir ./miro/
 
 REST API upload (direct to Miro):
   export MIRO_TOKEN=<your_token>
-  python lucid2miro.py diagram.csv --upload
-  python lucid2miro.py diagram.csv --upload --board-name "Q3 Infra" --summary
-  python lucid2miro.py diagram.csv --upload --frame-prefix "Sprint 3: "
-  python lucid2miro.py diagram.csv --upload --dry-run --summary
-  python lucid2miro.py ./exports/ --format csv --upload   # batch upload
+  python lucid2miro.py diagram.vsdx --upload
+  python lucid2miro.py diagram.csv  --upload --board-name "Q3 Infra" --summary
+  python lucid2miro.py diagram.vsdx --upload --frame-prefix "Sprint 3: "
+  python lucid2miro.py diagram.vsdx --upload --dry-run --summary
+  python lucid2miro.py ./exports/ --format vsdx --upload   # batch upload
 
 See docs/MIRO_AUTH.md for authentication setup.
 See docs/LUCIDCHART_FORMATS.md for format guidance.
@@ -1523,8 +1774,12 @@ See docs/LUCIDCHART_FORMATS.md for format guidance.
                    help="Miro board title (default: document title from source)")
     p.add_argument("-s", "--scale", metavar="N", type=float, default=1.0,
                    help="Uniform scale factor for all coordinates (default: 1.0)")
+    p.add_argument("--output-format", choices=["json", "vsdx"], default="json",
+                   dest="output_format",
+                   help="(Offline) Output format: json (default, Miro-importable JSON) "
+                        "or vsdx (Visio file for Miro 'Import from Visio' — no REST API needed)")
     p.add_argument("--pretty",  action="store_true",
-                   help="(Offline) Pretty-print the output JSON")
+                   help="(Offline JSON) Pretty-print the output JSON")
     p.add_argument("--summary", action="store_true",
                    help="Print a conversion / upload summary (per file in batch mode)")
     p.add_argument("--pages", metavar="N[,N]",
@@ -1587,6 +1842,25 @@ def _convert_file(input_path: Path, output_path: Path, args) -> Dict[str, Any]:
         _filter_pages(doc, args.pages)
         if not doc.pages:
             raise ValueError("--pages filter matched no pages")
+
+    out_fmt = getattr(args, "output_format", "json")
+
+    # VSDX: extract embedded icons to a sibling directory (both output modes)
+    icon_stats = _maybe_extract_icons(doc, input_path)
+
+    if out_fmt == "vsdx":
+        write_vsdx(doc, output_path, has_containment=has_containment, scale=args.scale)
+        pages_written = [p for p in doc.pages if p.items or p.lines]
+        return {
+            "doc": doc, "board": None,
+            "frames": len(pages_written),
+            "shapes": sum(len(p.items) for p in pages_written),
+            "texts":  0,
+            "images": 0,
+            "lines":  sum(len(p.lines) for p in pages_written),
+            "icon_stats": icon_stats,
+        }
+
     board = convert(doc, has_containment=has_containment, scale=args.scale)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
@@ -1594,10 +1868,6 @@ def _convert_file(input_path: Path, output_path: Path, args) -> Dict[str, Any]:
         encoding="utf-8",
     )
     widgets = board["board"]["widgets"]
-
-    # VSDX: extract embedded icons to a sibling directory
-    icon_stats = _maybe_extract_icons(doc, input_path)
-
     return {
         "doc": doc, "board": board,
         "frames":  sum(1 for w in widgets if w["type"] == "frame"),
@@ -1639,15 +1909,18 @@ def _maybe_extract_icons(doc: Document, input_path: Path) -> Optional[Dict[str, 
     return {"icons_dir": icons_dir, "icon_map": icon_map_path, "count": len(written)}
 
 
-def _print_summary(input_path: Path, output_path: Path, fmt: str, stats: Dict) -> None:
+def _print_summary(input_path: Path, output_path: Path, fmt: str, stats: Dict,
+                   out_fmt: str = "json") -> None:
     doc     = stats["doc"]
     skipped = sum(1 for p in doc.pages if not p.items and not p.lines)
+    out_label = "VSDX (Import from Visio)" if out_fmt == "vsdx" else "Miro JSON"
     print()
     print("Lucidchart → Miro conversion summary")
     print("─────────────────────────────────────")
-    print(f"  Source  : {input_path}")
-    print(f"  Format  : {fmt.upper()}")
-    print(f"  Output  : {output_path}")
+    print(f"  Source     : {input_path}")
+    print(f"  Input fmt  : {fmt.upper()}")
+    print(f"  Output fmt : {out_label}")
+    print(f"  Output     : {output_path}")
     print(f"  Pages   : {len(doc.pages)} total, {stats['frames']} exported as frames"
           + (f", {skipped} skipped (empty)" if skipped else ""))
     print(f"  Shapes  : {stats['shapes']}")
@@ -1664,8 +1937,10 @@ def _print_summary(input_path: Path, output_path: Path, fmt: str, stats: Dict) -
 
 
 def _run_single(args) -> None:
-    input_path = Path(args.input)
-    suffix     = input_path.suffix.lower()
+    input_path  = Path(args.input)
+    suffix      = input_path.suffix.lower()
+    out_fmt     = getattr(args, "output_format", "json")
+
     if suffix not in (".json", ".csv", ".vsdx"):
         sys.exit(f"Error: unsupported file type '{suffix}'. Use .csv, .json, or .vsdx.")
 
@@ -1673,6 +1948,12 @@ def _run_single(args) -> None:
     # made explicit before the file is written.
     if args.output:
         output_path = Path(args.output).resolve()
+    elif out_fmt == "vsdx":
+        # Avoid overwriting the source when input is already .vsdx
+        stem = input_path.stem
+        if suffix == ".vsdx":
+            stem = stem + "_converted"
+        output_path = input_path.with_name(stem + ".vsdx").resolve()
     elif args.clean_names:
         output_path = input_path.with_suffix(".json").resolve()
         if output_path == input_path.resolve():
@@ -1689,7 +1970,8 @@ def _run_single(args) -> None:
         sys.exit(f"Error: {exc}")
 
     if args.summary:
-        _print_summary(input_path, output_path, suffix.lstrip("."), stats)
+        _print_summary(input_path, output_path, suffix.lstrip("."), stats,
+                       out_fmt=getattr(args, "output_format", "json"))
     else:
         print(f"Written → {output_path}")
         if stats.get("icon_stats"):
@@ -1702,7 +1984,7 @@ def _run_batch(args) -> None:
     input_dir = Path(args.input)
 
     if not args.format:
-        sys.exit("Error: --format csv|json is required in batch mode.")
+        sys.exit("Error: --format vsdx|csv|json is required in batch mode.")
 
     output_dir = Path(args.output_dir).resolve() if args.output_dir else input_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1726,7 +2008,11 @@ def _run_batch(args) -> None:
     print(f"  Input dir  : {input_dir.resolve()}")
     print(f"  Output dir : {output_dir}\n")
 
-    out_suffix = ".json" if args.clean_names else ".miro.json"
+    out_fmt    = getattr(args, "output_format", "json")
+    out_suffix = (
+        ".vsdx" if out_fmt == "vsdx"
+        else (".json" if args.clean_names else ".miro.json")
+    )
 
     for input_path in input_files:
         output_path = (output_dir / input_path.stem).with_suffix(out_suffix).resolve()
@@ -1741,7 +2027,8 @@ def _run_batch(args) -> None:
             stats = _convert_file(input_path, output_path, args)
             ok += 1
             if args.summary:
-                _print_summary(input_path, output_path, args.format, stats)
+                _print_summary(input_path, output_path, args.format, stats,
+                               out_fmt=getattr(args, "output_format", "json"))
             else:
                 print(f"  ✓  {input_path.name.ljust(col_w)}  →  {output_path.name}")
         except Exception as exc:

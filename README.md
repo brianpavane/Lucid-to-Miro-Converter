@@ -14,10 +14,11 @@ directly to a Miro board via the REST API.
 | `.csv`  | File → Export → CSV  | Auto-layout with containment hierarchy |
 | `.json` | File → Export → JSON | Auto-layout, flat only |
 
-**Two output modes:**
+**Three output modes:**
 | Mode | When to use |
 |------|-------------|
-| **Offline JSON** *(default)* | Generate a local `.miro.json` file for manual import or scripting |
+| **Offline VSDX** (`--output-format vsdx`) | Generate a `.vsdx` file → import into Miro via "Import from Visio" (no token, no REST API) |
+| **Offline JSON** *(default)* | Generate a local `.miro.json` file for scripting or manual import |
 | **REST API upload** (`--upload`) | Create a live Miro board directly from the command line |
 
 ---
@@ -60,6 +61,22 @@ cd Lucid-to-Miro-Converter
 ---
 
 ## Quick start
+
+### Offline VSDX output (no Miro account or token needed)
+
+Import the output via Miro **→ "Import from Visio"** — no REST API required.
+
+```bash
+# VSDX passthrough — original layout preserved
+python lucid2miro.py diagram.vsdx --output-format vsdx
+
+# CSV/JSON → VSDX (auto-layout applied, then written as Visio)
+python lucid2miro.py diagram.csv  --output-format vsdx
+python lucid2miro.py diagram.json --output-format vsdx
+
+# Batch — convert all CSVs to VSDX
+python lucid2miro.py ./exports/ --format csv --output-format vsdx --output-dir ./out/
+```
 
 ### Offline JSON output (no Miro account needed)
 
@@ -303,7 +320,9 @@ auto-lays out the diagram:
 
 - Single self-contained file — one download, no package installation
 - **Three input formats:** VSDX (recommended), CSV, JSON
-- **VSDX:** original layout, per-shape styling, and embedded icons preserved
+- **Three output modes:** VSDX (no API needed), Miro JSON, REST API upload
+- **VSDX output** (`--output-format vsdx`): any input → Visio file → import via Miro "Import from Visio"
+- **VSDX input:** original layout, per-shape styling, and embedded icons preserved
 - Batch / bulk mode — convert an entire folder in one command
 - Multi-tab support — each Lucidchart page → a Miro frame, placed side-by-side
 - 50+ shape type mappings (basic, flowchart, AWS/GCP/Azure containers, arrows, callouts)
@@ -315,7 +334,7 @@ auto-lays out the diagram:
 
 ## Running tests
 
-The repository includes 85 tests for the importable package (`lucid_to_miro/`):
+The repository includes 97 tests for the importable package (`lucid_to_miro/`):
 
 ```bash
 # Built-in unittest (no install needed)
@@ -362,11 +381,12 @@ lucid_to_miro/            ← importable package (same logic, modular layout)
 ├── parser/
 │   ├── csv_parser.py
 │   ├── json_parser.py
-│   └── vsdx_parser.py    ← Visio parser (new in v1.5.0)
+│   └── vsdx_parser.py    ← Visio reader (new in v1.5.0)
 ├── converter/
 │   ├── miro.py
 │   ├── shape_map.py
-│   └── layout.py
+│   ├── layout.py
+│   └── vsdx_writer.py    ← Visio writer (new in v1.7.0)
 └── api/                  ← REST API client and uploader (new in v1.4.0)
     ├── miro_client.py
     └── uploader.py

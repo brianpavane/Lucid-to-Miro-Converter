@@ -848,5 +848,189 @@ class TestVsdxParser(unittest.TestCase):
             self.assertEqual(path.read_bytes(), png_header)
 
 
+# ─── VSDX writer ──────────────────────────────────────────────────────────────
+
+class TestVsdxWriter(unittest.TestCase):
+    """Tests for lucid_to_miro.converter.vsdx_writer.write_vsdx."""
+
+    def setUp(self):
+        from lucid_to_miro.converter.vsdx_writer import write_vsdx
+        from lucid_to_miro.model import Document, Page, Item, Line, Style
+        self._write = write_vsdx
+        self._Document = Document
+        self._Page = Page
+        self._Item = Item
+        self._Line = Line
+        self._Style = Style
+
+    def _simple_doc(self, n_items=2):
+        """Build a minimal Document with pre-set coordinates."""
+        doc = self._Document(title="Test", has_coordinates=True)
+        items = [
+            self._Item(id=f"s{i}", name="Block", text=f"Shape {i}",
+                       x=float(i * 200), y=50.0, width=160.0, height=80.0)
+            for i in range(n_items)
+        ]
+        doc.pages.append(self._Page(id="p1", title="Tab 1", items=items))
+        return doc
+
+    def _write_to_bytes(self, doc, **kwargs) -> bytes:
+        import io
+        buf = io.BytesIO()
+        self._write(doc, buf, **kwargs)
+        return buf.getvalue()
+
+    # ── Structure ─────────────────────────────────────────────────────────────
+
+    def test_output_is_valid_zip(self):
+        import zipfile, io
+        data = self._write_to_bytes(self._simple_doc())
+        self.assertTrue(zipfile.is_zipfile(io.BytesIO(data)))
+
+    def test_required_opc_members(self):
+        import zipfile, io
+        data = self._write_to_bytes(self._simple_doc())
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = set(zf.namelist())
+        for required in (
+            "[Content_Types].xml", "_rels/.rels",
+            "visio/document.xml", "visio/_rels/document.xml.rels",
+            "visio/pages/pages.xml", "visio/pages/_rels/pages.xml.rels",
+            "visio/pages/page1.xml",
+        ):
+            self.assertIn(required, names, msg=f"Missing {required}")
+
+    def test_multi_page_creates_multiple_page_files(self):
+        import zipfile, io
+        doc = self._Document(title="Multi", has_coordinates=True)
+        for i in range(3):
+            it = self._Item(id=f"x{i}", name="Block", x=0.0, y=0.0,
+                            width=100.0, height=50.0)
+            doc.pages.append(self._Page(id=f"pg{i}", title=f"Page {i+1}", items=[it]))
+        data = self._write_to_bytes(doc)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = set(zf.namelist())
+        for i in range(1, 4):
+            self.assertIn(f"visio/pages/page{i}.xml", names)
+
+    def test_page_titles_in_pages_xml(self):
+        import zipfile, io, xml.etree.ElementTree as ET
+        doc = self._simple_doc()
+        doc.pages[0].title = "My Custom Tab"
+        data = self._write_to_bytes(doc)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            pages_xml = zf.read("visio/pages/pages.xml").decode()
+        self.assertIn("My Custom Tab", pages_xml)
+
+    # ── Coordinates ───────────────────────────────────────────────────────────
+
+    def test_coordinate_round_trip(self):
+        """Write VSDX, parse it back, check pixel coords are preserved."""
+        import io, zipfile
+        from lucid_to_miro.parser.vsdx_parser import parse_vsdx
+        doc = self._Document(title="RT", has_coordinates=True)
+        it = self._Item(id="sh1", name="Block", text="Hello",
+                        x=96.0, y=192.0, width=192.0, height=96.0)
+        doc.pages.append(self._Page(id="p1", title="P1", items=[it]))
+        buf = io.BytesIO()
+        self._write(doc, buf)
+        doc2 = parse_vsdx(buf.getvalue())  # parser accepts raw bytes
+        self.assertEqual(len(doc2.pages), 1)
+        self.assertEqual(len(doc2.pages[0].items), 1)
+        it2 = doc2.pages[0].items[0]
+        self.assertAlmostEqual(it2.x,      96.0,  delta=2)
+        self.assertAlmostEqual(it2.y,      192.0, delta=2)
+        self.assertAlmostEqual(it2.width,  192.0, delta=2)
+        self.assertAlmostEqual(it2.height, 96.0,  delta=2)
+
+    def test_shape_text_in_page_xml(self):
+        import zipfile, io
+        doc = self._simple_doc(1)
+        doc.pages[0].items[0].text = "Hello World"
+        data = self._write_to_bytes(doc)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            page_xml = zf.read("visio/pages/page1.xml").decode()
+        self.assertIn("Hello World", page_xml)
+
+    # ── Connectors ────────────────────────────────────────────────────────────
+
+    def test_connector_in_page_xml(self):
+        import zipfile, io
+        doc = self._simple_doc(2)
+        line = self._Line(id="l1", source_id="s0", target_id="s1",
+                          source_arrow="none", target_arrow="arrow", text="edge")
+        doc.pages[0].lines.append(line)
+        data = self._write_to_bytes(doc)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            page_xml = zf.read("visio/pages/page1.xml").decode()
+        self.assertIn('Type="Edge"', page_xml)
+        self.assertIn("<Connects>",  page_xml)
+        self.assertIn("edge",        page_xml)
+
+    def test_connector_connect_elements(self):
+        import zipfile, io
+        doc = self._simple_doc(2)
+        line = self._Line(id="l1", source_id="s0", target_id="s1")
+        doc.pages[0].lines.append(line)
+        data = self._write_to_bytes(doc)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            page_xml = zf.read("visio/pages/page1.xml").decode()
+        self.assertEqual(page_xml.count("<Connect "), 2)
+
+    # ── Layout integration ────────────────────────────────────────────────────
+
+    def test_csv_doc_gets_layout_applied(self):
+        """CSV doc (no coords) should have coords after write_vsdx runs layout."""
+        import io
+        from lucid_to_miro.parser.csv_parser import parse_csv
+        from tests.make_fixtures import FIXTURE_DIR
+        doc, _ = parse_csv(FIXTURE_DIR / "sample.csv"), True
+        doc = parse_csv(FIXTURE_DIR / "sample.csv")
+        # All items start at 0,0 — after write_vsdx layout runs, at least one differs
+        buf = io.BytesIO()
+        self._write(doc, buf, has_containment=True)
+        any_nonzero = any(
+            it.x != 0 or it.y != 0
+            for pg in doc.pages for it in pg.items
+        )
+        self.assertTrue(any_nonzero)
+
+    def test_scale_applied(self):
+        import io
+        doc = self._simple_doc(1)
+        doc.pages[0].items[0].x = 100.0
+        doc.pages[0].items[0].width = 160.0
+        buf = io.BytesIO()
+        self._write(doc, buf, scale=2.0)
+        item = doc.pages[0].items[0]
+        self.assertAlmostEqual(item.x,     200.0, delta=1)
+        self.assertAlmostEqual(item.width, 320.0, delta=1)
+
+    # ── File output ───────────────────────────────────────────────────────────
+
+    def test_write_to_file_path(self):
+        import tempfile, zipfile
+        doc = self._simple_doc()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "out.vsdx"
+            self._write(doc, out)
+            self.assertTrue(out.exists())
+            self.assertTrue(zipfile.is_zipfile(str(out)))
+
+    def test_empty_pages_excluded(self):
+        import zipfile, io
+        doc = self._Document(title="T", has_coordinates=True)
+        doc.pages.append(self._Page(id="empty", title="Empty"))
+        doc.pages.append(self._Page(id="full",  title="Full",
+                                    items=[self._Item(id="x", name="Block",
+                                                      x=0.0, y=0.0,
+                                                      width=100.0, height=50.0)]))
+        data = self._write_to_bytes(doc)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = zf.namelist()
+        self.assertIn(    "visio/pages/page1.xml", names)
+        self.assertNotIn("visio/pages/page2.xml", names)
+
+
 if __name__ == "__main__":
     unittest.main()

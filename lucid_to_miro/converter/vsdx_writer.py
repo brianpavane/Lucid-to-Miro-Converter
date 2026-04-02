@@ -1,0 +1,386 @@
+"""
+Writes a normalised Document as a Visio (.vsdx) file.
+
+A .vsdx file is an Open Packaging Convention (OPC) ZIP archive.  This writer
+produces the minimal structure that Miro's "Import from Visio" feature (and
+Microsoft Visio itself) can read:
+
+    [Content_Types].xml
+    _rels/.rels
+    visio/document.xml
+    visio/_rels/document.xml.rels
+    visio/pages/pages.xml
+    visio/pages/_rels/pages.xml.rels
+    visio/pages/page{n}.xml          — one per non-empty Document page
+
+Coordinate conversion
+---------------------
+The internal model uses top-left origin, Y increases downward, pixels at 96 dpi.
+Visio uses bottom-left origin, Y increases upward, inches.  This writer converts
+at 96 dpi (the same constant used by the VSDX parser):
+
+    PinX    = (item.x + item.width  / 2) / 96
+    PinY    = page_height_in - (item.y + item.height / 2) / 96
+    Width   = item.width  / 96
+    Height  = item.height / 96
+    LocPinX = Width  / 2   (shape's own local origin = its centre)
+    LocPinY = Height / 2
+
+Connector coordinates use the centre of the connected shape.  Unresolvable
+endpoints are placed at default positions so the file remains valid.
+"""
+from __future__ import annotations
+
+import io
+import re
+import zipfile
+from pathlib import Path
+from typing import Dict, IO, List, Tuple, Union
+
+from lucid_to_miro.model import Document, Item, Line, Page
+from lucid_to_miro.converter.layout import layout_page, CONT_PAD
+
+DPI = 96  # pixels per inch (matches vsdx_parser.py)
+
+# Internal arrow token → Visio BeginArrow/EndArrow integer
+_ARROW_OUT: Dict[str, int] = {
+    "none":            0,
+    "arrow":           1,
+    "filled_triangle": 2,
+    "open_arrow":      3,
+    "circle":          5,
+    "open_diamond":    13,
+    "filled_diamond":  14,
+}
+
+# OPC / Visio content-type and relationship type URIs
+_CT_RELS   = "application/vnd.openxmlformats-package.relationships+xml"
+_CT_DOC    = "application/vnd.ms-visio.drawing.main+xml"
+_CT_PAGES  = "application/vnd.ms-visio.pages+xml"
+_CT_PAGE   = "application/vnd.ms-visio.page+xml"
+_NS_VISIO  = "http://schemas.microsoft.com/office/visio/2012/main"
+_NS_REL    = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_NS_PKG    = "http://schemas.openxmlformats.org/package/2006/relationships"
+_RT_DOC    = "http://schemas.microsoft.com/visio/2010/relationships/document"
+_RT_PAGES  = "http://schemas.microsoft.com/visio/2010/relationships/pages"
+_RT_PAGE   = "http://schemas.microsoft.com/visio/2010/relationships/page"
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _esc(text: str) -> str:
+    """Minimal XML text / attribute value escaping."""
+    return (text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def _colour(raw: str) -> str:
+    """Return a valid #rrggbb string; fall back to white."""
+    if raw and re.match(r"^#[0-9a-fA-F]{6}$", raw):
+        return raw.lower()
+    return "#ffffff"
+
+
+# ── OPC envelope ─────────────────────────────────────────────────────────────
+
+def _content_types(n_pages: int) -> str:
+    overrides = "\n".join(
+        f'  <Override PartName="/visio/pages/page{i + 1}.xml"'
+        f' ContentType="{_CT_PAGE}"/>'
+        for i in range(n_pages)
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+        f'  <Default Extension="rels" ContentType="{_CT_RELS}"/>\n'
+        '  <Default Extension="xml" ContentType="application/xml"/>\n'
+        f'  <Override PartName="/visio/document.xml" ContentType="{_CT_DOC}"/>\n'
+        f'  <Override PartName="/visio/pages/pages.xml" ContentType="{_CT_PAGES}"/>\n'
+        f'{overrides}\n'
+        '</Types>'
+    )
+
+
+def _root_rels() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Relationships xmlns="{_NS_PKG}">\n'
+        f'  <Relationship Id="rId1" Type="{_RT_DOC}"'
+        ' Target="visio/document.xml"/>\n'
+        '</Relationships>'
+    )
+
+
+def _document_xml() -> str:
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<VisioDocument xmlns="{_NS_VISIO}"/>'
+    )
+
+
+def _document_rels() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Relationships xmlns="{_NS_PKG}">\n'
+        f'  <Relationship Id="rId1" Type="{_RT_PAGES}"'
+        ' Target="pages/pages.xml"/>\n'
+        '</Relationships>'
+    )
+
+
+def _pages_xml(pages: List[Page]) -> str:
+    entries = []
+    for i, page in enumerate(pages):
+        name = _esc(page.title or f"Page-{i + 1}")
+        entries.append(
+            f'  <Page ID="{i + 1}" NameU="{name}" IsCustomNameU="1"'
+            f' Name="{name}" IsCustomName="1">\n'
+            f'    <Rel r:id="rId{i + 1}"'
+            f' xmlns:r="{_NS_REL}"/>\n'
+            f'  </Page>'
+        )
+    body = "\n".join(entries)
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<Pages xmlns="{_NS_VISIO}">\n'
+        f'{body}\n'
+        '</Pages>'
+    )
+
+
+def _pages_rels(pages: List[Page]) -> str:
+    entries = "\n".join(
+        f'  <Relationship Id="rId{i + 1}" Type="{_RT_PAGE}"'
+        f' Target="page{i + 1}.xml"/>'
+        for i in range(len(pages))
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Relationships xmlns="{_NS_PKG}">\n'
+        f'{entries}\n'
+        '</Relationships>'
+    )
+
+
+# ── Per-page XML ──────────────────────────────────────────────────────────────
+
+def _shape_xml(int_id: int, item: Item, page_h_in: float) -> str:
+    """Render one Item as a Visio <Shape Type="Shape"> element.
+
+    Geometry is written inside an <XForm> child element using element-name
+    tags (e.g. <Width V="..."/>) because the parser's _find_float() looks for
+    namespace-qualified element names inside XForm, not Cell/@N attributes.
+    Colour cells use Cell/@N because _cell_value() expects that pattern.
+    """
+    w_in  = max(item.width,  1.0) / DPI
+    h_in  = max(item.height, 1.0) / DPI
+    pin_x = (item.x + item.width  / 2.0) / DPI
+    pin_y = page_h_in - (item.y + item.height / 2.0) / DPI
+    loc_x = w_in / 2.0
+    loc_y = h_in / 2.0
+
+    fill  = _colour(item.style.fill_color)
+    line  = _colour(item.style.stroke_color)
+    label = _esc(item.text or "")
+    text_elem = f"\n  <Text>{label}</Text>" if label else ""
+
+    ns = _NS_VISIO
+    return (
+        f'<Shape ID="{int_id}" Type="Shape"'
+        ' LineStyle="0" FillStyle="0" TextStyle="0">\n'
+        f'  <XForm xmlns="{ns}">\n'
+        f'    <PinX V="{pin_x:.6f}"/>\n'
+        f'    <PinY V="{pin_y:.6f}"/>\n'
+        f'    <Width V="{w_in:.6f}"/>\n'
+        f'    <Height V="{h_in:.6f}"/>\n'
+        f'    <LocPinX V="{loc_x:.6f}" F="Width*0.5"/>\n'
+        f'    <LocPinY V="{loc_y:.6f}" F="Height*0.5"/>\n'
+        f'  </XForm>\n'
+        f'  <Cell N="FillForegnd" V="{fill}"/>\n'
+        f'  <Cell N="LineColor"   V="{line}"/>'
+        f'{text_elem}\n'
+        '</Shape>'
+    )
+
+
+def _connector_xml(
+    conn_id: int,
+    line: Line,
+    id_map: Dict[str, int],
+    item_map: Dict[str, Item],
+    page_h_in: float,
+) -> Tuple[str, List[str]]:
+    """
+    Render a Line as a Visio <Shape Type="Edge"> element.
+
+    Returns (shape_xml_string, [connect_xml_string, ...]).
+    """
+    def _ctr(item: Item) -> Tuple[float, float]:
+        cx = (item.x + item.width  / 2.0) / DPI
+        cy = page_h_in - (item.y + item.height / 2.0) / DPI
+        return cx, cy
+
+    src = item_map.get(line.source_id) if line.source_id else None
+    tgt = item_map.get(line.target_id) if line.target_id else None
+
+    bx, by = _ctr(src) if src else (1.0, page_h_in / 2.0)
+    ex, ey = _ctr(tgt) if tgt else (2.0, page_h_in / 2.0)
+
+    b_arrow = _ARROW_OUT.get(line.source_arrow, 0)
+    e_arrow = _ARROW_OUT.get(line.target_arrow, 1)
+    label   = _esc(line.text or "")
+    text_elem = f"\n  <Text>{label}</Text>" if label else ""
+
+    shape = (
+        f'<Shape ID="{conn_id}" Type="Edge"'
+        ' LineStyle="0" FillStyle="0" TextStyle="0">\n'
+        f'  <Cell N="BeginX"    V="{bx:.6f}"/>\n'
+        f'  <Cell N="BeginY"    V="{by:.6f}"/>\n'
+        f'  <Cell N="EndX"      V="{ex:.6f}"/>\n'
+        f'  <Cell N="EndY"      V="{ey:.6f}"/>\n'
+        f'  <Cell N="BeginArrow" V="{b_arrow}"/>\n'
+        f'  <Cell N="EndArrow"   V="{e_arrow}"/>'
+        f'{text_elem}\n'
+        '</Shape>'
+    )
+
+    connects: List[str] = []
+    if src and line.source_id in id_map:
+        connects.append(
+            f'<Connect FromSheet="{conn_id}" ToSheet="{id_map[line.source_id]}"'
+            ' FromCell="BeginX" ToCell="PinX"/>'
+        )
+    if tgt and line.target_id in id_map:
+        connects.append(
+            f'<Connect FromSheet="{conn_id}" ToSheet="{id_map[line.target_id]}"'
+            ' FromCell="EndX" ToCell="PinX"/>'
+        )
+    return shape, connects
+
+
+def _page_xml(page: Page, page_h_in: float) -> str:
+    """Render a full page{n}.xml for one Page.
+
+    A <PageSheet><PageProps><PageHeight> element is included so the parser
+    can read back the correct page height and invert Y coordinates properly.
+    """
+    # Integer ID map: item.id (str) → sequential int starting at 1
+    id_map: Dict[str, int] = {it.id: i + 1 for i, it in enumerate(page.items)}
+    item_map: Dict[str, Item] = {it.id: it for it in page.items}
+
+    shape_parts: List[str] = []
+    connect_parts: List[str] = []
+    next_id = len(page.items) + 1
+
+    for item in page.items:
+        shape_parts.append(_shape_xml(id_map[item.id], item, page_h_in))
+
+    for line in page.lines:
+        s_xml, c_xmls = _connector_xml(next_id, line, id_map, item_map, page_h_in)
+        shape_parts.append(s_xml)
+        connect_parts.extend(c_xmls)
+        next_id += 1
+
+    indent = "  "
+    shapes_inner = "\n".join(f"{indent}{s}" for s in shape_parts)
+    connects_block = ""
+    if connect_parts:
+        c_inner = "\n".join(f"{indent}{c}" for c in connect_parts)
+        connects_block = f"\n<Connects>\n{c_inner}\n</Connects>"
+
+    ns = _NS_VISIO
+    page_sheet = (
+        f'<PageSheet xmlns="{ns}" LineStyle="0" FillStyle="0" TextStyle="0">\n'
+        f'  <PageProps>\n'
+        f'    <PageHeight V="{page_h_in:.6f}"/>\n'
+        f'  </PageProps>\n'
+        f'</PageSheet>'
+    )
+
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<PageContents xmlns="{_NS_VISIO}"\n'
+        f'              xmlns:r="{_NS_REL}">\n'
+        f'{page_sheet}\n'
+        f'<Shapes>\n'
+        f'{shapes_inner}\n'
+        f'</Shapes>'
+        f'{connects_block}\n'
+        '</PageContents>'
+    )
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def write_vsdx(
+    doc: Document,
+    dest: Union[str, Path, IO[bytes]],
+    has_containment: bool = True,
+    scale: float = 1.0,
+) -> None:
+    """
+    Convert a normalised Document to a .vsdx file.
+
+    Accepts any Document produced by the CSV, JSON, or VSDX parsers.
+    If the document does not already carry coordinates (CSV / JSON input),
+    the auto-layout engine is run first.
+
+    Args:
+        doc:             Parsed document.
+        dest:            Output file path (str / Path) or a writable binary
+                         file-like object (e.g. io.BytesIO for testing).
+        has_containment: True for CSV input (parent_id populated); False for JSON.
+                         Ignored when doc.has_coordinates is True (VSDX input).
+        scale:           Uniform scale factor applied after layout.
+    """
+    # Layout CSV / JSON input (VSDX already has coordinates)
+    if not doc.has_coordinates:
+        for page in doc.pages:
+            if page.items or page.lines:
+                layout_page(page, has_containment)
+
+    # Apply optional scale
+    if scale != 1.0:
+        for page in doc.pages:
+            for item in page.items:
+                item.x      *= scale
+                item.y      *= scale
+                item.width  *= scale
+                item.height *= scale
+
+    # Only include pages that have content
+    pages = [p for p in doc.pages if p.items or p.lines]
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml",               _content_types(len(pages)))
+        zf.writestr("_rels/.rels",                        _root_rels())
+        zf.writestr("visio/document.xml",                 _document_xml())
+        zf.writestr("visio/_rels/document.xml.rels",      _document_rels())
+        zf.writestr("visio/pages/pages.xml",              _pages_xml(pages))
+        zf.writestr("visio/pages/_rels/pages.xml.rels",   _pages_rels(pages))
+
+        for idx, page in enumerate(pages):
+            # Page height in inches: bounding box of all items + padding
+            if page.items:
+                max_y_px = max(it.y + it.height for it in page.items)
+            else:
+                max_y_px = 600.0
+            page_h_in = (max_y_px + CONT_PAD) / DPI
+
+            zf.writestr(
+                f"visio/pages/page{idx + 1}.xml",
+                _page_xml(page, page_h_in),
+            )
+
+    data = buf.getvalue()
+
+    if isinstance(dest, (str, Path)):
+        out = Path(dest)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(data)
+    else:
+        dest.write(data)
