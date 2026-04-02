@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.0] — 2026-04-01
+
+### Added
+- **Single-file distribution** — `lucid2miro.py` is now fully self-contained; all six previously separate modules (model, shape map, layout engine, CSV parser, JSON parser, Miro converter) are inlined in dependency order under clearly labelled section headers. No package directory required for execution.
+- `--version` flag added to CLI (`python lucid2miro.py --version`)
+
+### Retrieving the single file
+```bash
+# macOS / Linux
+curl -o lucid2miro.py https://raw.githubusercontent.com/brianpavane/Lucid-to-Miro-Converter/main/lucid2miro.py
+
+# Windows (PowerShell)
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/brianpavane/Lucid-to-Miro-Converter/main/lucid2miro.py" -OutFile "lucid2miro.py"
+```
+
+### Security
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- **MEDIUM fixed:** Bare `except` in CSV page-sort key narrowed to `except (ValueError, TypeError)` to avoid swallowing `KeyboardInterrupt`/`SystemExit`
+- **MEDIUM acknowledged:** Single-file `--output` path is resolved via `Path.resolve()` and documented; equivalent to batch-mode behaviour
+- All other checks passed (no subprocess, no unsafe deserialization, no hardcoded secrets, no ReDoS risk)
+
 ## [1.1.0] — 2026-04-01
 
 ### Added

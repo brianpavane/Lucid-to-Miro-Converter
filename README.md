@@ -9,29 +9,56 @@ Convert Lucidchart exports to Miro-importable JSON.
 **Supported input formats:**
 | Format | How to export from Lucidchart |
 |--------|-------------------------------|
+| `.csv`  | File → Export → CSV  |
 | `.json` | File → Export → JSON |
-| `.csv`  | File → Export → CSV |
 
-**Features:**
-- **Batch mode** — convert an entire folder of `.csv` or `.json` files in one command
-- Multi-tab / multi-page diagrams → one Miro frame per tab, placed side-by-side
-- Auto-layout: positions and sizes all shapes (neither export format carries coordinates)
-- CSV: uses "Contained By" hierarchy to nest shapes inside containers with correct indentation
-- JSON: clusters group-members together, then arranges groups in a grid
-- 50+ shape type mappings (basic, flowchart, cloud-provider containers, arrows, callouts)
-- SVGPathBlock2 / icon shapes → Miro image widgets
-- Text-only shapes (MinimalTextBlock) → Miro text widgets
-- Connectors with labels and arrow styles preserved
-- Optional page filtering via `--pages`
+---
+
+## Getting the tool
+
+### Single file — download `lucid2miro.py` only
+
+The entire converter ships as a single, self-contained Python file. You only need this one file to run it.
+
+**macOS / Linux:**
+```bash
+curl -o lucid2miro.py https://raw.githubusercontent.com/brianpavane/Lucid-to-Miro-Converter/main/lucid2miro.py
+```
+
+**Windows (PowerShell):**
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/brianpavane/Lucid-to-Miro-Converter/main/lucid2miro.py" -OutFile "lucid2miro.py"
+```
+
+**GitHub CLI:**
+```bash
+gh api repos/brianpavane/Lucid-to-Miro-Converter/contents/lucid2miro.py \
+  --jq '.content' | base64 --decode > lucid2miro.py
+```
+
+**Git sparse-checkout (if you want to stay in sync with updates):**
+```bash
+git clone --filter=blob:none --sparse https://github.com/brianpavane/Lucid-to-Miro-Converter.git
+cd Lucid-to-Miro-Converter
+git sparse-checkout set lucid2miro.py
+```
+
+### Full repository clone
+```bash
+git clone https://github.com/brianpavane/Lucid-to-Miro-Converter.git
+cd Lucid-to-Miro-Converter
+```
+
+---
 
 ## Usage
 
 ```bash
 # Single file
-python lucid2miro.py <input.json|csv> [options]
+python lucid2miro.py <input.csv|json> [options]
 
 # Batch — convert every .csv (or .json) in a folder
-python lucid2miro.py <input-dir/> --format csv|json --output-dir <output-dir/> [options]
+python lucid2miro.py <input-dir/> --format csv|json [--output-dir <dir/>] [options]
 ```
 
 ### Options
@@ -41,33 +68,37 @@ python lucid2miro.py <input-dir/> --format csv|json --output-dir <output-dir/> [
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--format csv\|json` | File type to convert *(required)* | — |
-| `--output-dir DIR` | Directory for output files | Input directory |
+| `--output-dir DIR` | Directory for converted files | Input directory |
 
 **Single-file & shared flags:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-o, --output FILE` | Output file path *(single-file only)* | `<input>.miro.json` |
+| `-o, --output FILE` | Output path *(single-file only)* | `<input>.miro.json` |
 | `-t, --title TITLE` | Miro board title | Title from source file |
 | `-s, --scale N` | Uniform coordinate scale factor | `1.0` |
 | `--pretty` | Pretty-print output JSON | off |
-| `--summary` | Print conversion stats (per-file in batch) | off |
-| `--pages N[,N]` | Include only these pages — titles or 1-based indices *(single-file only)* | all |
+| `--summary` | Print conversion stats (per file in batch) | off |
+| `--pages N[,N]` | Page titles or 1-based indices to include *(single-file only)* | all |
+| `--version` | Print version and exit | — |
 
 ### Single-file examples
 
 ```bash
-# Convert a JSON export
-python lucid2miro.py diagram.json
+# Basic conversion
+python lucid2miro.py diagram.csv
 
-# Convert a CSV export with a custom title and pretty output
+# Custom title, pretty output, and per-page summary
 python lucid2miro.py diagram.csv -t "My Architecture" --pretty --summary
 
-# Scale up all coordinates and export only two pages
-python lucid2miro.py diagram.json --scale 1.5 --pages "HA,Forwarding Rules"
+# Specific pages by title
+python lucid2miro.py diagram.json --pages "HA,Forwarding Rules"
 
-# Export only pages 1 and 3 by index
-python lucid2miro.py diagram.csv --pages "1,3"
+# Specific pages by index, scaled up
+python lucid2miro.py diagram.csv --pages "1,3" --scale 1.5
+
+# Explicit output path
+python lucid2miro.py diagram.csv -o ~/Desktop/board.json --pretty
 ```
 
 ### Batch examples
@@ -79,16 +110,18 @@ python lucid2miro.py ./exports/ --format csv --output-dir ./miro/
 # Convert all JSONs with per-file summaries
 python lucid2miro.py ./exports/ --format json --output-dir ./miro/ --summary
 
-# Batch with scaling and pretty output; output defaults to input folder
+# Output defaults to same folder as input files
 python lucid2miro.py ./exports/ --format csv --scale 1.5 --pretty
 ```
 
-Output filenames mirror input stems: `diagram.csv` → `diagram.miro.json`.
-The output directory is created automatically (including any parent directories) if it does not exist.
+Output filenames mirror input stems: `diagram.csv` → `diagram.miro.json`.  
+The output directory is created automatically (including nested paths) if it does not exist.
+
+---
 
 ## Output format
 
-The converter produces JSON compatible with the Miro REST API v2:
+Produces JSON compatible with the Miro REST API v2:
 
 ```json
 {
@@ -127,40 +160,58 @@ The converter produces JSON compatible with the Miro REST API v2:
 | MinimalTextBlock / label | `text` |
 | Line / connector | `line` |
 
+---
+
 ## Auto-layout
 
-Because Lucidchart's CSV and JSON exports contain **no coordinate data**, the converter auto-lays out every diagram:
+Neither Lucidchart export format carries coordinate data, so the converter auto-lays out every diagram:
 
-- **CSV** — uses the "Contained By" column to reconstruct the containment tree. Leaf shapes are sized to defaults (160×80 px for shapes, 80×80 for icons). Containers are sized bottom-up to wrap their children, then all top-level items are arranged in a sqrt(n)-column grid.
-- **JSON** — no containment info is available, so shapes that share a `group_id` are clustered together and the clusters are arranged in a grid.
+- **CSV** — reconstructs the containment tree from the `Contained By` column. Leaf shapes get default dimensions (160×80 px; 80×80 for icons). Containers are sized bottom-up to wrap their children. All top-level items are arranged in a √n-column grid.
+- **JSON** — no containment data is available. Shapes sharing a `group_id` are clustered together; clusters are arranged in a grid.
+
+---
+
+## Features
+
+- Single self-contained file — one download, no package installation
+- Batch / bulk mode — convert an entire folder in one command
+- Multi-tab support — each Lucidchart page → a Miro frame, placed side-by-side
+- 50+ shape type mappings (basic, flowchart, AWS/GCP/Azure containers, arrows, callouts)
+- Connectors with labels and arrow styles
+- Optional page filtering and coordinate scaling
+
+---
 
 ## Running tests
+
+The repository includes 62 tests for the importable package (`lucid_to_miro/`):
 
 ```bash
 # Built-in unittest (no install needed)
 python3 -m unittest discover -s tests -v
 
 # Or with pytest
-pip install pytest
-pytest tests/ -v
+pip install pytest && pytest tests/ -v
 ```
 
-51 tests covering parsers, shape mapping, layout engine, converter, and CLI.
+---
 
 ## Project structure
 
 ```
-lucid_to_miro/
-├── model.py              Normalised data model (Document, Page, Item, Line)
+lucid2miro.py             ← single-file standalone converter (start here)
+
+lucid_to_miro/            ← importable package (same logic, modular layout)
+├── model.py
 ├── parser/
-│   ├── csv_parser.py     Lucidchart CSV parser
-│   └── json_parser.py    Lucidchart JSON parser
+│   ├── csv_parser.py
+│   └── json_parser.py
 └── converter/
-    ├── miro.py           Miro JSON serialiser
-    ├── shape_map.py      50+ shape type mappings
-    └── layout.py         Auto-layout engine
-lucid2miro.py             CLI entry point
+    ├── miro.py
+    ├── shape_map.py
+    └── layout.py
+
 tests/
-├── test_converter.py     51 unit + integration tests
+├── test_converter.py     62 unit + integration tests
 └── make_fixtures.py      Generates synthetic test fixtures
 ```
