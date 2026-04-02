@@ -503,5 +503,141 @@ class TestBatch(unittest.TestCase):
             self.assertGreater(f2["geometry"]["width"], f1["geometry"]["width"])
 
 
+# ─── --clean-names flag ───────────────────────────────────────────────────────
+
+class TestCleanNames(unittest.TestCase):
+    """Tests for the --clean-names output-naming option."""
+
+    def setUp(self):
+        from lucid2miro import main
+        self.main = main
+
+    def _make_input_dir(self, tmp, fmt, count=2):
+        import shutil
+        src = CSV_FILE if fmt == "csv" else JSON_FILE
+        d = Path(tmp) / "inputs"
+        d.mkdir()
+        for i in range(count):
+            shutil.copy(src, d / f"diagram_{i}.{fmt}")
+        return d
+
+    # ── Batch: different output dir ───────────────────────────────────────────
+
+    def test_batch_clean_names_produces_dot_json(self):
+        """--clean-names batch → outputs are <stem>.json, not <stem>.miro.json"""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "csv", count=2)
+            out_dir = Path(tmp) / "out"
+            self.main([str(in_dir), "--format", "csv",
+                       "--output-dir", str(out_dir), "--clean-names"])
+            out_files = list(out_dir.glob("*.json"))
+            self.assertEqual(len(out_files), 2)
+            for f in out_files:
+                self.assertFalse(f.name.endswith(".miro.json"),
+                                 f"{f.name} should not contain .miro")
+
+    def test_batch_clean_names_stems_match_input(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "csv", count=2)
+            out_dir = Path(tmp) / "out"
+            self.main([str(in_dir), "--format", "csv",
+                       "--output-dir", str(out_dir), "--clean-names"])
+            stems = {f.stem for f in out_dir.glob("*.json")}
+            self.assertIn("diagram_0", stems)
+            self.assertIn("diagram_1", stems)
+
+    def test_batch_clean_names_output_is_valid(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "csv", count=1)
+            out_dir = Path(tmp) / "out"
+            self.main([str(in_dir), "--format", "csv",
+                       "--output-dir", str(out_dir), "--clean-names"])
+            out_file = next(out_dir.glob("*.json"))
+            data = json.loads(out_file.read_text())
+            self.assertEqual(data["version"], "1")
+
+    def test_batch_clean_names_json_format(self):
+        """Works for JSON input format too."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "json", count=2)
+            out_dir = Path(tmp) / "out"
+            self.main([str(in_dir), "--format", "json",
+                       "--output-dir", str(out_dir), "--clean-names"])
+            out_files = list(out_dir.glob("*.json"))
+            self.assertEqual(len(out_files), 2)
+            for f in out_files:
+                self.assertFalse(f.name.endswith(".miro.json"))
+
+    # ── Batch: same dir is rejected ───────────────────────────────────────────
+
+    def test_batch_clean_names_same_dir_exits(self):
+        """--clean-names with output == input dir must be rejected (would overwrite sources)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir = self._make_input_dir(tmp, "csv", count=1)
+            with self.assertRaises(SystemExit) as cm:
+                self.main([str(in_dir), "--format", "csv", "--clean-names"])
+            self.assertNotEqual(cm.exception.code, 0)
+
+    def test_batch_clean_names_explicit_same_dir_exits(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir = self._make_input_dir(tmp, "csv", count=1)
+            with self.assertRaises(SystemExit) as cm:
+                # --output-dir explicitly set to the same path
+                self.main([str(in_dir), "--format", "csv",
+                           "--output-dir", str(in_dir), "--clean-names"])
+            self.assertNotEqual(cm.exception.code, 0)
+
+    # ── Single-file mode ──────────────────────────────────────────────────────
+
+    def test_single_clean_names_csv_input(self):
+        """CSV input + --clean-names → <stem>.json (no .miro)"""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "diagram_0.json"
+            self.main([str(CSV_FILE), "-o", str(out), "--clean-names"])
+            self.assertTrue(out.exists())
+            data = json.loads(out.read_text())
+            self.assertEqual(data["version"], "1")
+
+    def test_single_clean_names_would_overwrite_json_exits(self):
+        """JSON input + --clean-names with no -o must be rejected (would overwrite source)."""
+        import tempfile, shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            # Copy fixture so we don't touch the real file
+            src = Path(tmp) / "diagram.json"
+            shutil.copy(JSON_FILE, src)
+            with self.assertRaises(SystemExit) as cm:
+                self.main([str(src), "--clean-names"])
+            self.assertNotEqual(cm.exception.code, 0)
+
+    def test_single_clean_names_json_explicit_output_ok(self):
+        """JSON input + --clean-names is fine when -o points elsewhere."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "board.json"
+            self.main([str(JSON_FILE), "-o", str(out), "--clean-names"])
+            self.assertTrue(out.exists())
+            data = json.loads(out.read_text())
+            self.assertEqual(data["version"], "1")
+
+    # ── Default still works ───────────────────────────────────────────────────
+
+    def test_default_naming_unchanged(self):
+        """Without --clean-names, .miro.json suffix is still used."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            in_dir  = self._make_input_dir(tmp, "csv", count=1)
+            out_dir = Path(tmp) / "out"
+            self.main([str(in_dir), "--format", "csv", "--output-dir", str(out_dir)])
+            out_files = list(out_dir.glob("*.miro.json"))
+            self.assertEqual(len(out_files), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -80,6 +80,7 @@ python lucid2miro.py <input-dir/> --format csv|json [--output-dir <dir/>] [optio
 | `--pretty` | Pretty-print output JSON | off |
 | `--summary` | Print conversion stats (per file in batch) | off |
 | `--pages N[,N]` | Page titles or 1-based indices to include *(single-file only)* | all |
+| `--clean-names` | Name outputs `<stem>.json` instead of `<stem>.miro.json` — requires `--output-dir` to differ from input dir in batch mode | off |
 | `--version` | Print version and exit | — |
 
 ### Single-file examples
@@ -104,8 +105,11 @@ python lucid2miro.py diagram.csv -o ~/Desktop/board.json --pretty
 ### Batch examples
 
 ```bash
-# Convert all CSVs in ./exports/ → ./miro/
+# Convert all CSVs in ./exports/ → ./miro/  (outputs: diagram.miro.json)
 python lucid2miro.py ./exports/ --format csv --output-dir ./miro/
+
+# Clean output names — same stem, just .json  (outputs: diagram.json)
+python lucid2miro.py ./exports/ --format csv --output-dir ./miro/ --clean-names
 
 # Convert all JSONs with per-file summaries
 python lucid2miro.py ./exports/ --format json --output-dir ./miro/ --summary
@@ -114,7 +118,15 @@ python lucid2miro.py ./exports/ --format json --output-dir ./miro/ --summary
 python lucid2miro.py ./exports/ --format csv --scale 1.5 --pretty
 ```
 
-Output filenames mirror input stems: `diagram.csv` → `diagram.miro.json`.  
+**Output filenames:**
+
+| Mode | Output name |
+|------|-------------|
+| Default | `diagram.csv` → `diagram.miro.json` |
+| `--clean-names` | `diagram.csv` → `diagram.json` |
+
+`--clean-names` requires `--output-dir` to point to a **different** directory than the input — the converter will refuse if they are the same to prevent source files from being overwritten.
+
 The output directory is created automatically (including nested paths) if it does not exist.
 
 ---
@@ -161,6 +173,32 @@ Produces JSON compatible with the Miro REST API v2:
 | Line / connector | `line` |
 
 ---
+
+## CSV vs JSON — which format to use
+
+**Use CSV.** It produces significantly better results and is the recommended input format.
+
+### Why CSV is preferred
+
+Lucidchart's CSV export includes a `Contained By` column that encodes the full containment hierarchy for every shape — which region contains which Availability Zone, which subnet sits inside which VPC, and so on. The converter uses this to reconstruct a proper nesting tree and lay out containers wrapping their children, exactly as they appear in the original diagram.
+
+Lucidchart's JSON export omits all position and containment data entirely. Every shape on a page is a peer with no parent; the converter can only cluster shapes that share a `group_id` and arrange those clusters in a flat grid. The resulting Miro board is structurally flat regardless of how deeply nested the original diagram was.
+
+| Capability | CSV | JSON |
+|---|---|---|
+| Containment hierarchy (`Contained By`) | ✅ | ❌ |
+| Nested layout (VPC → AZ → Subnet → shape) | ✅ | ❌ |
+| Shape Library name (AWS 2021, GCP 2018…) | ✅ | ❌ |
+| Exact internal class name (`DefaultSquareBlock`) | ❌ | ✅ |
+| Structured text-area labels | ❌ | ✅ |
+
+The containment hierarchy advantage is decisive for any cloud architecture, network, or swimlane diagram. The JSON class-name and text-label advantages are minor in practice — the CSV `Name` + `Shape Library` columns provide enough signal to map every shape type correctly.
+
+### When JSON is acceptable
+
+Use JSON only when:
+- The diagram is intentionally flat (no containers — just shapes connected by lines), in which case both formats produce equivalent results
+- A CSV export is unavailable for that diagram
 
 ## Auto-layout
 

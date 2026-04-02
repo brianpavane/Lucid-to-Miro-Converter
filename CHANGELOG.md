@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.0] — 2026-04-01
+
+### Added
+- **`--clean-names` flag** — when `--output-dir` points to a different directory than the input, outputs are named `<stem>.json` instead of `<stem>.miro.json` (e.g. `diagram.csv` → `diagram.json`)
+  - Batch mode: requires `--output-dir` to differ from input directory; exits with an error if they are the same to prevent source files being overwritten
+  - Single-file mode: exits with an error if `--clean-names` would overwrite a `.json` source file; safe when `-o` is specified explicitly
+- **README — CSV vs JSON recommendation** section: explains why CSV is the preferred input format (containment hierarchy → proper nested layout) and when JSON is acceptable (flat diagrams)
+- 10 new tests for `--clean-names` covering batch/single-file modes, happy paths, and all safety guards (72 total)
+
+### Security
+- Pre-release scan performed (`/shannon` AgentShield invocation failed — fallback manual review; failure flagged to user)
+- **MEDIUM fixed:** Batch output path escape check replaced `str.startswith()` string comparison with `Path.relative_to()` (raises `ValueError` on escape), making the guard correct under case-insensitive filesystems and symlink scenarios
+- All other checks passed
+
 ## [1.2.0] — 2026-04-01
 
 ### Added

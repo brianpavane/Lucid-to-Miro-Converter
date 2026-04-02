@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Data model
@@ -696,6 +696,10 @@ Batch examples (pass a directory as input):
                    help="Print a conversion summary (per file in batch mode)")
     p.add_argument("--pages", metavar="N[,N]",
                    help="(Single) Comma-separated page titles or 1-based indices to include")
+    p.add_argument("--clean-names", action="store_true",
+                   help="Use source stem + .json as output name instead of stem + .miro.json. "
+                        "In batch mode requires --output-dir to differ from input directory "
+                        "to avoid overwriting source files.")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
@@ -766,9 +770,17 @@ def _run_single(args) -> None:
 
     # Resolve to an absolute path so symlink traversal and ".." segments are
     # made explicit before the file is written.
-    output_path = (
-        Path(args.output) if args.output else input_path.with_suffix(".miro.json")
-    ).resolve()
+    if args.output:
+        output_path = Path(args.output).resolve()
+    elif args.clean_names:
+        output_path = input_path.with_suffix(".json").resolve()
+        if output_path == input_path.resolve():
+            sys.exit(
+                "Error: --clean-names would overwrite the source file.\n"
+                "       Use -o to specify a different output path."
+            )
+    else:
+        output_path = input_path.with_suffix(".miro.json").resolve()
 
     try:
         stats = _convert_file(input_path, output_path, args)
@@ -790,6 +802,14 @@ def _run_batch(args) -> None:
     output_dir = Path(args.output_dir).resolve() if args.output_dir else input_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # --clean-names is only safe when outputs land in a different directory,
+    # otherwise .json source files would be silently overwritten.
+    if args.clean_names and output_dir == input_dir.resolve():
+        sys.exit(
+            "Error: --clean-names requires --output-dir to be a different directory "
+            "from the input directory to avoid overwriting source files."
+        )
+
     input_files = sorted(input_dir.glob(f"*.{args.format}"))
     if not input_files:
         sys.exit(f"Error: no .{args.format} files found in {input_dir}")
@@ -801,9 +821,13 @@ def _run_batch(args) -> None:
     print(f"  Input dir  : {input_dir.resolve()}")
     print(f"  Output dir : {output_dir}\n")
 
+    out_suffix = ".json" if args.clean_names else ".miro.json"
+
     for input_path in input_files:
-        output_path = (output_dir / input_path.stem).with_suffix(".miro.json").resolve()
-        if not str(output_path).startswith(str(output_dir)):
+        output_path = (output_dir / input_path.stem).with_suffix(out_suffix).resolve()
+        try:
+            output_path.relative_to(output_dir)   # raises ValueError if outside
+        except ValueError:
             print(f"  ✗  {input_path.name.ljust(col_w)}  —  SKIPPED: output path escapes output dir")
             fail += 1
             failures.append((input_path.name, "output path escapes output_dir"))
