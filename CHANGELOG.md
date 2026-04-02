@@ -1,5 +1,59 @@
 # Changelog
 
+## [1.13.0] — 2026-04-02
+
+### Added
+
+- **`Line.start_x / start_y / end_x / end_y`** (`model.py`) — optional pixel
+  coordinates for connectors whose endpoints are not attached to a shape ID.
+  Used by the VSDX parser for position-based connectors and honoured by both
+  the Miro JSON converter and the VSDX writer.
+
+- **Position-based connector parsing** (`vsdx_parser.py`) — Lucidchart VSDX
+  often encodes connectors as ordinary `Shape` elements carrying
+  `BeginX`/`BeginY`/`EndX`/`EndY` cells rather than `<Connects>` topology.
+  These are now detected and parsed as `Line` objects with `start_x/y/end_x/y`
+  pixel coordinates (Y-axis inverted from Visio inches).
+
+- **Connector shape detection broadened** (`vsdx_parser.py`,
+  `_collect_connector_ids()`) — shapes that carry `BeginX` or `EndX` cells are
+  now identified as connectors and excluded from the `Item` list even when
+  absent from `<Connects>`.
+
+- **Richer OPC package** (`vsdx_writer.py`) — generated `.vsdx` files now
+  include the additional parts present in native Lucid/Visio output:
+  - `docProps/app.xml` and `docProps/core.xml`
+  - `visio/windows.xml` with viewport metadata
+  - Expanded `visio/document.xml` with `DocumentSettings`
+  - Full `PageSheet` metadata (margins, scale, orientation, snap settings)
+    embedded inline in `visio/pages/pages.xml` per page
+
+- **Floating connector endpoints in writer** (`vsdx_writer.py`,
+  `_connector_xml()`) — when a `Line` has `start_x/y` or `end_x/y` set and no
+  resolvable shape ID, the writer uses the pixel coordinates (converted back to
+  Visio inches with Y inversion) instead of fixed default positions.
+
+- **Floating connector endpoints in Miro converter** (`converter/miro.py`,
+  `_build_line_widget()`) — same fallback: `line.start_x/y` and `line.end_x/y`
+  are used when shape IDs are unresolvable.
+
+### Changed
+
+- `_parse_connectors()` now receives `page_height` to correctly invert Y for
+  position-based connector coordinates
+- `_pages_xml()` now receives pre-computed `page_sizes` and embeds per-page
+  `PageSheet` cells directly in `pages.xml`
+- Page size computation refactored into a single pre-pass before ZIP assembly
+- Version bump to 1.13.0
+
+### Security
+
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- **No new attack surface:** all changes are XML parsing and string formatting;
+  no subprocess, exec, eval, or external network calls
+- Connector cell values parsed via `float()` inside `try/except (TypeError, ValueError)`
+- All checks passed (99 tests)
+
 ## [1.12.0] — 2026-04-02
 
 ### Changed
@@ -52,8 +106,20 @@
   - direct singleton `Cell` entries for key transform values
   - a simple rectangle `Geometry` section (`MoveTo` + `LineTo` rows) so
     shapes have explicit visible geometry for Visio consumers
+- Generated VSDX packages now also include richer document-level parts that
+  better match native Lucid/Visio output:
+  - `visio/windows.xml`
+  - `docProps/app.xml`
+  - `docProps/core.xml`
+  - expanded `visio/document.xml` settings
+  - page-level metadata in `visio/pages/pages.xml`
 - Intended to improve compatibility with Miro's native **Import from Visio**
   flow in cases where generated `.vsdx` files previously imported as blank
+- Native `.vsdx -> .vsdx` conversion now uses a true passthrough path when no
+  transformations are requested (`--pages`, `--title`, `--scale` absent), so
+  the output preserves the original Lucid file byte-for-byte
+- Native Lucid connector-like shapes with `BeginX`/`EndX` cells are now parsed
+  as `Line` objects instead of being misclassified as generic items
 - Documentation updated with VSDX import compatibility notes and retest guidance
 - Version bump to 1.10.0
 

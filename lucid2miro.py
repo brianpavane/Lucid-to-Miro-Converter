@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-__version__ = "1.12.0"
+__version__ = "1.13.0"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Data model
@@ -91,6 +91,10 @@ class Line:
     id:           str
     source_id:    Optional[str]
     target_id:    Optional[str]
+    start_x:      Optional[float] = None
+    start_y:      Optional[float] = None
+    end_x:        Optional[float] = None
+    end_y:        Optional[float] = None
     source_arrow: str   = "none"
     target_arrow: str   = "arrow"
     text:         str   = ""
@@ -802,22 +806,28 @@ def _vparse_shapes(shapes_root: ET.Element, page_id: str,
 
 
 def _vcollect_conn_ids(root: ET.Element) -> Set[str]:
+    ids: Set[str] = set()
     connects = root.find(_vt("Connects"))
-    if connects is None:
-        return set()
-    return {c.get("FromSheet", "") for c in connects.findall(_vt("Connect"))
-            if c.get("FromSheet")}
+    if connects is not None:
+        ids.update(c.get("FromSheet", "") for c in connects.findall(_vt("Connect"))
+                   if c.get("FromSheet"))
+    sr = root.find(_vt("Shapes"))
+    if sr is not None:
+        for s in sr.iter(_vt("Shape")):
+            sid = s.get("ID", "")
+            if sid and (_vcell(s, "BeginX") or _vcell(s, "EndX")):
+                ids.add(sid)
+    return ids
 
 
-def _vparse_lines(root: ET.Element, page_id: str) -> List[Line]:
-    connects = root.find(_vt("Connects"))
-    if connects is None:
-        return []
+def _vparse_lines(root: ET.Element, page_id: str, page_height: float) -> List[Line]:
     conn_map: Dict[str, Dict[str, str]] = {}
-    for c in connects.findall(_vt("Connect")):
-        fid = c.get("FromSheet", ""); fc = c.get("FromCell", ""); ts = c.get("ToSheet", "")
-        if fid and fc and ts:
-            conn_map.setdefault(fid, {})[fc] = ts
+    connects = root.find(_vt("Connects"))
+    if connects is not None:
+        for c in connects.findall(_vt("Connect")):
+            fid = c.get("FromSheet", ""); fc = c.get("FromCell", ""); ts = c.get("ToSheet", "")
+            if fid and fc and ts:
+                conn_map.setdefault(fid, {})[fc] = ts
 
     shape_by_id: Dict[str, ET.Element] = {}
     sr = root.find(_vt("Shapes"))
@@ -842,6 +852,38 @@ def _vparse_lines(root: ET.Element, page_id: str) -> List[Line]:
             target_arrow=_varrow(_vcell(cs, "EndArrow")   if cs else None),
             text=_vtext(cs.find(_vt("Text"))) if cs else "",
         ))
+
+    if sr is not None:
+        for s in sr.iter(_vt("Shape")):
+            sid = s.get("ID", "")
+            if not sid or sid in conn_map:
+                continue
+            bx_raw = _vcell(s, "BeginX")
+            by_raw = _vcell(s, "BeginY")
+            ex_raw = _vcell(s, "EndX")
+            ey_raw = _vcell(s, "EndY")
+            if not ((bx_raw and by_raw) or (ex_raw and ey_raw)):
+                continue
+            try:
+                bx = float(bx_raw) * _DPI if bx_raw else None
+                by = (page_height - float(by_raw)) * _DPI if by_raw else None
+                ex = float(ex_raw) * _DPI if ex_raw else None
+                ey = (page_height - float(ey_raw)) * _DPI if ey_raw else None
+            except (TypeError, ValueError):
+                continue
+            lines.append(Line(
+                id=f"{page_id}_{sid}",
+                source_id=None,
+                target_id=None,
+                start_x=bx,
+                start_y=by,
+                end_x=ex,
+                end_y=ey,
+                source_arrow=_varrow(_vcell(s, "BeginArrow")),
+                target_arrow=_varrow(_vcell(s, "EndArrow")),
+                text=_vtext(s.find(_vt("Text"))),
+                style=Style(stroke_color=_vnorm_color(_vcell(s, "LineColor"))),
+            ))
     return lines
 
 
@@ -871,7 +913,7 @@ def _vparse_page(zf: zipfile.ZipFile, page_xml: str,
     items    = _vparse_shapes(shapes_root, page_id, masters, page_rels, zf,
                                cont_h=page_height, abs_x=0.0, abs_y=0.0,
                                conn_ids=conn_ids)
-    lines    = _vparse_lines(root, page_id)
+    lines    = _vparse_lines(root, page_id, page_height)
     return Page(id=page_id, title=page_title, items=items, lines=lines)
 
 
@@ -958,12 +1000,15 @@ _VSDXW_CT_RELS   = "application/vnd.openxmlformats-package.relationships+xml"
 _VSDXW_CT_DOC    = "application/vnd.ms-visio.drawing.main+xml"
 _VSDXW_CT_PAGES  = "application/vnd.ms-visio.pages+xml"
 _VSDXW_CT_PAGE   = "application/vnd.ms-visio.page+xml"
+_VSDXW_CT_APP    = "application/vnd.openxmlformats-officedocument.extended-properties+xml"
+_VSDXW_CT_CORE   = "application/vnd.openxmlformats-package.core-properties+xml"
 _VSDXW_NS_VISIO  = "http://schemas.microsoft.com/office/visio/2012/main"
 _VSDXW_NS_REL    = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _VSDXW_NS_PKG    = "http://schemas.openxmlformats.org/package/2006/relationships"
 _VSDXW_RT_DOC    = "http://schemas.microsoft.com/visio/2010/relationships/document"
 _VSDXW_RT_PAGES  = "http://schemas.microsoft.com/visio/2010/relationships/pages"
 _VSDXW_RT_PAGE   = "http://schemas.microsoft.com/visio/2010/relationships/page"
+_VSDXW_RT_WINDOWS = "http://schemas.microsoft.com/visio/2010/relationships/windows"
 
 _VSDXW_ARROW_OUT: Dict[str, int] = {
     "none": 0, "arrow": 1, "filled_triangle": 2, "open_arrow": 3,
@@ -992,6 +1037,8 @@ def _vw_content_types(n: int) -> str:
         f'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
         f'  <Default Extension="rels" ContentType="{_VSDXW_CT_RELS}"/>\n'
         '  <Default Extension="xml" ContentType="application/xml"/>\n'
+        f'  <Override PartName="/docProps/app.xml" ContentType="{_VSDXW_CT_APP}"/>\n'
+        f'  <Override PartName="/docProps/core.xml" ContentType="{_VSDXW_CT_CORE}"/>\n'
         f'  <Override PartName="/visio/document.xml" ContentType="{_VSDXW_CT_DOC}"/>\n'
         f'  <Override PartName="/visio/pages/pages.xml" ContentType="{_VSDXW_CT_PAGES}"/>\n'
         f'{ov}\n</Types>'
@@ -1012,16 +1059,63 @@ def _vw_document_rels() -> str:
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         f'<Relationships xmlns="{_VSDXW_NS_PKG}">\n'
         f'  <Relationship Id="rId1" Type="{_VSDXW_RT_PAGES}" Target="pages/pages.xml"/>\n'
+        f'  <Relationship Id="rId2" Type="{_VSDXW_RT_WINDOWS}" Target="windows.xml"/>\n'
         '</Relationships>'
     )
 
 
-def _vw_pages_xml(pages: list) -> str:
+def _vw_document_xml() -> str:
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<VisioDocument xmlns="{_VSDXW_NS_VISIO}" xmlns:r="{_VSDXW_NS_REL}" xml:space="preserve">\n'
+        '  <DocumentSettings TopPage="0" DefaultTextStyle="3" DefaultLineStyle="3" DefaultFillStyle="3" DefaultGuideStyle="4">\n'
+        '    <GlueSettings>9</GlueSettings>\n'
+        '    <SnapSettings>295</SnapSettings>\n'
+        '    <SnapExtensions>34</SnapExtensions>\n'
+        '    <SnapAngles/>\n'
+        '    <DynamicGridEnabled>0</DynamicGridEnabled>\n'
+        '    <ProtectStyles>0</ProtectStyles>\n'
+        '    <ProtectShapes>0</ProtectShapes>\n'
+        '    <ProtectMasters>0</ProtectMasters>\n'
+        '    <ProtectBkgnds>0</ProtectBkgnds>\n'
+        '  </DocumentSettings>\n'
+        '</VisioDocument>'
+    )
+
+
+def _vw_pages_xml(pages: list, page_sizes: list[tuple[float, float]]) -> str:
     entries = []
     for i, page in enumerate(pages):
         name = _vw_esc(page.title or f"Page-{i+1}")
+        page_w_in, page_h_in = page_sizes[i]
         entries.append(
-            f'  <Page ID="{i+1}" NameU="{name}" IsCustomNameU="1" Name="{name}" IsCustomName="1">\n'
+            f'  <Page ID="{i}" NameU="{name}" IsCustomNameU="1" Name="{name}" IsCustomName="1" ViewScale="-1" ViewCenterX="{page_w_in / 2:.6f}" ViewCenterY="{page_h_in / 2:.6f}">\n'
+            '    <PageSheet LineStyle="0" FillStyle="0" TextStyle="0">\n'
+            f'      <Cell N="PageWidth" V="{page_w_in:.6f}"/>\n'
+            f'      <Cell N="PageHeight" V="{page_h_in:.6f}"/>\n'
+            '      <Cell N="ShdwOffsetX" V="0.125"/>\n'
+            '      <Cell N="ShdwOffsetY" V="-0.125"/>\n'
+            '      <Cell N="PageScale" V="1" U="IN_F"/>\n'
+            '      <Cell N="DrawingScale" V="1" U="IN_F"/>\n'
+            '      <Cell N="DrawingSizeType" V="0"/>\n'
+            '      <Cell N="DrawingScaleType" V="3"/>\n'
+            '      <Cell N="InhibitSnap" V="0"/>\n'
+            '      <Cell N="PageLockReplace" V="0" U="BOOL"/>\n'
+            '      <Cell N="PageLockDuplicate" V="0" U="BOOL"/>\n'
+            '      <Cell N="UIVisibility" V="0"/>\n'
+            '      <Cell N="ShdwType" V="0"/>\n'
+            '      <Cell N="ShdwObliqueAngle" V="0"/>\n'
+            '      <Cell N="ShdwScaleFactor" V="1"/>\n'
+            '      <Cell N="DrawingResizeType" V="1"/>\n'
+            '      <Cell N="PageShapeSplit" V="1"/>\n'
+            '      <Cell N="PageLeftMargin" V="0.2"/>\n'
+            '      <Cell N="PageRightMargin" V="0.2"/>\n'
+            '      <Cell N="PageTopMargin" V="0.2"/>\n'
+            '      <Cell N="PageBottomMargin" V="0.2"/>\n'
+            '      <Cell N="PrintPageOrientation" V="2"/>\n'
+            '      <Cell N="LineJumpCode" V="0"/>\n'
+            '      <Cell N="LineJumpStyle" V="1"/>\n'
+            '    </PageSheet>\n'
             f'    <Rel r:id="rId{i+1}" xmlns:r="{_VSDXW_NS_REL}"/>\n'
             f'  </Page>'
         )
@@ -1040,6 +1134,28 @@ def _vw_pages_rels(pages: list) -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         f'<Relationships xmlns="{_VSDXW_NS_PKG}">\n{rows}\n</Relationships>'
+    )
+
+
+def _vw_windows_xml(page_sizes: list[tuple[float, float]]) -> str:
+    page_w_in, page_h_in = page_sizes[0] if page_sizes else (11.0, 8.5)
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<Windows ClientWidth="1920" ClientHeight="977" xmlns="{_VSDXW_NS_VISIO}" xmlns:r="{_VSDXW_NS_REL}" xml:space="preserve"><Window ID="0" WindowType="Drawing" WindowState="1073741824" WindowLeft="-8" WindowTop="-31" WindowWidth="1936" WindowHeight="1016" ContainerType="Page" Page="0" ViewScale="-1" ViewCenterX="{page_w_in / 2:.6f}" ViewCenterY="{page_h_in / 2:.6f}"><ShowRulers>1</ShowRulers><ShowGrid>0</ShowGrid><ShowPageBreaks>1</ShowPageBreaks><ShowGuides>1</ShowGuides><ShowConnectionPoints>1</ShowConnectionPoints><GlueSettings>9</GlueSettings><SnapSettings>65847</SnapSettings><SnapExtensions>34</SnapExtensions><SnapAngles/><DynamicGridEnabled>1</DynamicGridEnabled><TabSplitterPos>0.5</TabSplitterPos></Window></Windows>'
+    )
+
+
+def _vw_app_xml() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"></Properties>'
+    )
+
+
+def _vw_core_xml() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"></cp:coreProperties>'
     )
 
 
@@ -1106,8 +1222,18 @@ def _vw_connector(conn_id: int, line, id_map: dict, item_map: dict, page_h_in: f
         return (it.x + it.width/2.0)/DPI, page_h_in - (it.y + it.height/2.0)/DPI
     src = item_map.get(line.source_id) if line.source_id else None
     tgt = item_map.get(line.target_id) if line.target_id else None
-    bx, by = _ctr(src) if src else (1.0, page_h_in/2.0)
-    ex, ey = _ctr(tgt) if tgt else (2.0, page_h_in/2.0)
+    if src:
+        bx, by = _ctr(src)
+    elif line.start_x is not None and line.start_y is not None:
+        bx, by = line.start_x / DPI, page_h_in - (line.start_y / DPI)
+    else:
+        bx, by = (1.0, page_h_in/2.0)
+    if tgt:
+        ex, ey = _ctr(tgt)
+    elif line.end_x is not None and line.end_y is not None:
+        ex, ey = line.end_x / DPI, page_h_in - (line.end_y / DPI)
+    else:
+        ex, ey = (2.0, page_h_in/2.0)
     ba = _VSDXW_ARROW_OUT.get(line.source_arrow, 0)
     ea = _VSDXW_ARROW_OUT.get(line.target_arrow, 1)
     label = _vw_esc(line.text or "")
@@ -1194,21 +1320,24 @@ def write_vsdx(doc: Document, dest, has_containment: bool = True, scale: float =
                 item.width *= scale; item.height *= scale
 
     pages = [p for p in doc.pages if p.items or p.lines]
+    page_sizes = []
+    for page in pages:
+        max_x = max((it.x + it.width for it in page.items), default=800.0)
+        max_y = max((it.y + it.height for it in page.items), default=600.0)
+        page_sizes.append(((max_x + CONT_PAD) / DPI, (max_y + CONT_PAD) / DPI))
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml",             _vw_content_types(len(pages)))
         zf.writestr("_rels/.rels",                      _vw_root_rels())
-        zf.writestr("visio/document.xml",
-                    '<?xml version="1.0" encoding="utf-8"?>\n'
-                    f'<VisioDocument xmlns="{_VSDXW_NS_VISIO}"/>')
+        zf.writestr("docProps/app.xml",                 _vw_app_xml())
+        zf.writestr("docProps/core.xml",                _vw_core_xml())
+        zf.writestr("visio/document.xml",               _vw_document_xml())
         zf.writestr("visio/_rels/document.xml.rels",    _vw_document_rels())
-        zf.writestr("visio/pages/pages.xml",            _vw_pages_xml(pages))
+        zf.writestr("visio/windows.xml",                _vw_windows_xml(page_sizes))
+        zf.writestr("visio/pages/pages.xml",            _vw_pages_xml(pages, page_sizes))
         zf.writestr("visio/pages/_rels/pages.xml.rels", _vw_pages_rels(pages))
         for idx, page in enumerate(pages):
-            max_x = max((it.x + it.width for it in page.items), default=800.0)
-            max_y = max((it.y + it.height for it in page.items), default=600.0)
-            page_w_in = (max_x + CONT_PAD) / DPI
-            page_h_in = (max_y + CONT_PAD) / DPI
+            page_w_in, page_h_in = page_sizes[idx]
             zf.writestr(f"visio/pages/page{idx+1}.xml", _vw_page_xml(page, page_w_in, page_h_in))
     data = buf.getvalue()
     if isinstance(dest, (str, Path)):
@@ -1288,10 +1417,19 @@ def _line_widget(line: Line, frame_id: str,
     src = item_lookup.get(line.source_id) if line.source_id else None
     tgt = item_lookup.get(line.target_id) if line.target_id else None
     if src is None and tgt is None:
-        return None
-
-    sx, sy = _centre(src) if src else (round(board_x + 100), 100)
-    ex, ey = _centre(tgt) if tgt else (round(board_x + 200), 200)
+        if line.start_x is None or line.start_y is None or line.end_x is None or line.end_y is None:
+            return None
+        sx, sy = round(line.start_x + board_x), round(line.start_y)
+        ex, ey = round(line.end_x + board_x), round(line.end_y)
+    else:
+        sx, sy = _centre(src) if src else (
+            round((line.start_x or 100) + board_x),
+            round(line.start_y or 100),
+        )
+        ex, ey = _centre(tgt) if tgt else (
+            round((line.end_x or 200) + board_x),
+            round(line.end_y or 200),
+        )
 
     return {
         "type": "line", "id": line.id or None, "parentId": frame_id,
@@ -1880,6 +2018,28 @@ def _convert_file(input_path: Path, output_path: Path, args) -> Dict[str, Any]:
             raise ValueError("--pages filter matched no pages")
 
     out_fmt = getattr(args, "output_format", "json")
+
+    # Native VSDX passthrough preserves full Lucid/Visio fidelity when no
+    # transformations were requested.
+    if (
+        out_fmt == "vsdx"
+        and input_path.suffix.lower() == ".vsdx"
+        and not getattr(args, "title", None)
+        and not getattr(args, "pages", None)
+        and float(getattr(args, "scale", 1.0)) == 1.0
+    ):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(input_path.read_bytes())
+        pages_written = [p for p in doc.pages if p.items or p.lines]
+        return {
+            "doc": doc, "board": None,
+            "frames": len(pages_written),
+            "shapes": sum(len(p.items) for p in pages_written),
+            "texts": 0,
+            "images": 0,
+            "lines": sum(len(p.lines) for p in pages_written),
+            "icon_stats": None,
+        }
 
     # VSDX: extract embedded icons to a sibling directory (both output modes)
     icon_stats = _maybe_extract_icons(doc, input_path)

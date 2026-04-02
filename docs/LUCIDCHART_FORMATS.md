@@ -168,6 +168,10 @@ python lucid2miro.py diagram.vsdx
 # Offline: write a Visio file for Miro "Import from Visio"
 python lucid2miro.py diagram.json --output-format vsdx
 
+# Native VSDX passthrough: preserves the original file exactly when no
+# transformations are requested
+python lucid2miro.py diagram.vsdx --output-format vsdx
+
 # Validate page/tab and object counts before and after writing
 python lucid2miro.py diagram.json --output-format vsdx --debug-counts
 
@@ -206,6 +210,9 @@ python lucid2miro.py diagram.vsdx --upload --dry-run --summary
   that previously imported as blank
 - Generated shapes now also include explicit rectangle geometry sections so the
   output contains visible shape paths, not just transform metadata
+- Generated packages now also include richer document-level parts such as
+  `visio/windows.xml`, `docProps/app.xml`, `docProps/core.xml`, and expanded
+  page metadata so the output more closely resembles native Lucid `.vsdx` files
 - Generated `.vsdx` output skips empty pages; `--debug-counts` can be used to
   confirm how many pages/tabs and objects were read from the source and written
   to the output file
@@ -219,6 +226,9 @@ python lucid2miro.py diagram.vsdx --upload --dry-run --summary
   retest with the latest version first before comparing counts. The page and
   object counts can be correct even when the generated package still lacks a
   compatibility detail required by Miro's importer
+- For native `.vsdx` input, `--output-format vsdx` now uses a byte-for-byte
+  passthrough path when no transformations are requested. That is the highest
+  fidelity path for Miro's native Visio import
 
 ---
 

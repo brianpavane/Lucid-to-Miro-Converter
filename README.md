@@ -72,6 +72,9 @@ Recent compatibility fixes also write geometry values in both Visio forms
 files previously appeared blank when imported into Miro.
 Generated shapes now also include explicit rectangle geometry sections, not just
 position and size metadata.
+Generated packages now also include richer document-level Visio parts such as
+`visio/windows.xml`, `docProps/app.xml`, `docProps/core.xml`, and expanded page
+metadata in `visio/pages/pages.xml`.
 
 ```bash
 # VSDX passthrough — original layout preserved
@@ -266,7 +269,17 @@ native Lucid `.vsdx` import and retest with the latest writer first. The most
 recent compatibility update changed the generated XML so page and shape geometry
 is written both as attributes and as element text, and visible shapes now carry
 an explicit rectangle geometry section, which some Visio consumers appear to
-require.
+require. The generated package now also includes window and document metadata
+that more closely matches native Lucid `.vsdx` output.
+
+For native `.vsdx` input specifically, `--output-format vsdx` now takes a true
+passthrough path when no transformations are requested. That means:
+- no `--pages`
+- no `--title`
+- `--scale 1.0`
+
+In that case the output `.vsdx` is a byte-for-byte copy of the original Lucid
+file, which is the best-fidelity option for Miro's native Visio import.
 
 ---
 

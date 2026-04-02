@@ -51,6 +51,10 @@ class Line:
     id: str
     source_id: Optional[str]    # ID of connected source shape (may be None)
     target_id: Optional[str]    # ID of connected target shape (may be None)
+    start_x: Optional[float] = None
+    start_y: Optional[float] = None
+    end_x: Optional[float] = None
+    end_y: Optional[float] = None
     source_arrow: str = "none"  # e.g. "None", "Arrow", "OpenArrow"
     target_arrow: str = "arrow"
     text: str = ""

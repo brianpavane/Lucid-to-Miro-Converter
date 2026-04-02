@@ -133,19 +133,21 @@ def _build_line_widget(line: Line, frame_id: str,
     src = item_lookup.get(line.source_id) if line.source_id else None
     tgt = item_lookup.get(line.target_id) if line.target_id else None
 
-    # We need at least one resolvable endpoint to place the line
     if src is None and tgt is None:
-        return None
-
-    if src is not None:
-        sx, sy = _centre(src)
+        if line.start_x is None or line.start_y is None or line.end_x is None or line.end_y is None:
+            return None
+        sx, sy = (round(line.start_x + board_offset_x), round(line.start_y))
+        ex, ey = (round(line.end_x + board_offset_x), round(line.end_y))
     else:
-        sx, sy = (round(board_offset_x + 100), 100)
+        if src is not None:
+            sx, sy = _centre(src)
+        else:
+            sx, sy = (round((line.start_x or 100) + board_offset_x), round(line.start_y or 100))
 
-    if tgt is not None:
-        ex, ey = _centre(tgt)
-    else:
-        ex, ey = (round(board_offset_x + 200), 200)
+        if tgt is not None:
+            ex, ey = _centre(tgt)
+        else:
+            ex, ey = (round((line.end_x or 200) + board_offset_x), round(line.end_y or 200))
 
     return {
         "type":     "line",

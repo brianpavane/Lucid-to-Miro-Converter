@@ -303,11 +303,20 @@ def _collect_connector_ids(root: ET.Element, page_id: str) -> Set[str]:
     Scan the <Connects> section and return the set of connector shape IDs
     (raw IDs from the XML, before page_id prefixing).
     """
+    connector_ids: Set[str] = set()
     connects = root.find(_vtag("Connects"))
-    if connects is None:
-        return set()
-    return {c.get("FromSheet", "") for c in connects.findall(_vtag("Connect"))
-            if c.get("FromSheet")}
+    if connects is not None:
+        connector_ids.update(
+            c.get("FromSheet", "") for c in connects.findall(_vtag("Connect"))
+            if c.get("FromSheet")
+        )
+    shapes_root = root.find(_vtag("Shapes"))
+    if shapes_root is not None:
+        for shape in shapes_root.iter(_vtag("Shape")):
+            sid = shape.get("ID", "")
+            if sid and (_cell_value(shape, "BeginX") or _cell_value(shape, "EndX")):
+                connector_ids.add(sid)
+    return connector_ids
 
 
 def _parse_shapes_recursive(
@@ -423,6 +432,7 @@ def _parse_connectors(
     root: ET.Element,
     page_id: str,
     connector_ids: Set[str],
+    page_height: float,
 ) -> List[Line]:
     """
     Parse the <Connects> section into Line objects.
@@ -432,18 +442,15 @@ def _parse_connectors(
         <Connect FromSheet="10" FromCell="EndX"   ToSheet="2" ToCell="PinX"/>
     FromSheet=connector ID, BeginX=start endpoint, EndX=end endpoint.
     """
-    connects = root.find(_vtag("Connects"))
-    if connects is None:
-        return []
-
-    # Build {connector_id: {FromCell: ToSheet}} mapping
     conn_map: Dict[str, Dict[str, str]] = {}
-    for c in connects.findall(_vtag("Connect")):
-        from_id   = c.get("FromSheet", "")
-        from_cell = c.get("FromCell",  "")
-        to_sheet  = c.get("ToSheet",   "")
-        if from_id and from_cell and to_sheet:
-            conn_map.setdefault(from_id, {})[from_cell] = to_sheet
+    connects = root.find(_vtag("Connects"))
+    if connects is not None:
+        for c in connects.findall(_vtag("Connect")):
+            from_id   = c.get("FromSheet", "")
+            from_cell = c.get("FromCell",  "")
+            to_sheet  = c.get("ToSheet",   "")
+            if from_id and from_cell and to_sheet:
+                conn_map.setdefault(from_id, {})[from_cell] = to_sheet
 
     # Build a shape lookup for extracting arrow style and label from the connector
     shape_by_id: Dict[str, ET.Element] = {}
@@ -480,6 +487,42 @@ def _parse_connectors(
             target_arrow=_arrow_token(end_arrow),
             text=label,
         ))
+
+    # Lucid VSDX often encodes connectors as ordinary Shape elements carrying
+    # BeginX/BeginY/EndX/EndY cells rather than <Connects> topology.
+    shapes_root = root.find(_vtag("Shapes"))
+    if shapes_root is not None:
+        for shape in shapes_root.iter(_vtag("Shape")):
+            shape_id = shape.get("ID", "")
+            if not shape_id or shape_id in conn_map:
+                continue
+            begin_x = _cell_value(shape, "BeginX")
+            begin_y = _cell_value(shape, "BeginY")
+            end_x   = _cell_value(shape, "EndX")
+            end_y   = _cell_value(shape, "EndY")
+            if not ((begin_x and begin_y) or (end_x and end_y)):
+                continue
+            try:
+                bx = float(begin_x) * DPI if begin_x else None
+                by = (page_height - float(begin_y)) * DPI if begin_y else None
+                ex = float(end_x) * DPI if end_x else None
+                ey = (page_height - float(end_y)) * DPI if end_y else None
+            except (TypeError, ValueError):
+                continue
+            label = _extract_text(shape.find(_vtag("Text")))
+            lines.append(Line(
+                id=f"{page_id}_{shape_id}",
+                source_id=None,
+                target_id=None,
+                start_x=bx,
+                start_y=by,
+                end_x=ex,
+                end_y=ey,
+                source_arrow=_arrow_token(_cell_value(shape, "BeginArrow")),
+                target_arrow=_arrow_token(_cell_value(shape, "EndArrow")),
+                text=label,
+                style=Style(stroke_color=_normalise_color(_cell_value(shape, "LineColor"))),
+            ))
 
     return lines
 
@@ -534,7 +577,7 @@ def _parse_page(
     )
 
     # Third pass: parse connectors into Lines
-    lines = _parse_connectors(root, page_id, connector_ids)
+    lines = _parse_connectors(root, page_id, connector_ids, page_height)
 
     return Page(id=page_id, title=page_title, items=items, lines=lines)
 

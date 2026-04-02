@@ -58,12 +58,15 @@ _CT_RELS   = "application/vnd.openxmlformats-package.relationships+xml"
 _CT_DOC    = "application/vnd.ms-visio.drawing.main+xml"
 _CT_PAGES  = "application/vnd.ms-visio.pages+xml"
 _CT_PAGE   = "application/vnd.ms-visio.page+xml"
+_CT_APP    = "application/vnd.openxmlformats-officedocument.extended-properties+xml"
+_CT_CORE   = "application/vnd.openxmlformats-package.core-properties+xml"
 _NS_VISIO  = "http://schemas.microsoft.com/office/visio/2012/main"
 _NS_REL    = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _NS_PKG    = "http://schemas.openxmlformats.org/package/2006/relationships"
 _RT_DOC    = "http://schemas.microsoft.com/visio/2010/relationships/document"
 _RT_PAGES  = "http://schemas.microsoft.com/visio/2010/relationships/pages"
 _RT_PAGE   = "http://schemas.microsoft.com/visio/2010/relationships/page"
+_RT_WINDOWS = "http://schemas.microsoft.com/visio/2010/relationships/windows"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -97,6 +100,8 @@ def _content_types(n_pages: int) -> str:
         f'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
         f'  <Default Extension="rels" ContentType="{_CT_RELS}"/>\n'
         '  <Default Extension="xml" ContentType="application/xml"/>\n'
+        f'  <Override PartName="/docProps/app.xml" ContentType="{_CT_APP}"/>\n'
+        f'  <Override PartName="/docProps/core.xml" ContentType="{_CT_CORE}"/>\n'
         f'  <Override PartName="/visio/document.xml" ContentType="{_CT_DOC}"/>\n'
         f'  <Override PartName="/visio/pages/pages.xml" ContentType="{_CT_PAGES}"/>\n'
         f'{overrides}\n'
@@ -117,7 +122,19 @@ def _root_rels() -> str:
 def _document_xml() -> str:
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
-        f'<VisioDocument xmlns="{_NS_VISIO}"/>'
+        f'<VisioDocument xmlns="{_NS_VISIO}" xmlns:r="{_NS_REL}" xml:space="preserve">\n'
+        '  <DocumentSettings TopPage="0" DefaultTextStyle="3" DefaultLineStyle="3" DefaultFillStyle="3" DefaultGuideStyle="4">\n'
+        '    <GlueSettings>9</GlueSettings>\n'
+        '    <SnapSettings>295</SnapSettings>\n'
+        '    <SnapExtensions>34</SnapExtensions>\n'
+        '    <SnapAngles/>\n'
+        '    <DynamicGridEnabled>0</DynamicGridEnabled>\n'
+        '    <ProtectStyles>0</ProtectStyles>\n'
+        '    <ProtectShapes>0</ProtectShapes>\n'
+        '    <ProtectMasters>0</ProtectMasters>\n'
+        '    <ProtectBkgnds>0</ProtectBkgnds>\n'
+        '  </DocumentSettings>\n'
+        '</VisioDocument>'
     )
 
 
@@ -127,17 +144,47 @@ def _document_rels() -> str:
         f'<Relationships xmlns="{_NS_PKG}">\n'
         f'  <Relationship Id="rId1" Type="{_RT_PAGES}"'
         ' Target="pages/pages.xml"/>\n'
+        f'  <Relationship Id="rId2" Type="{_RT_WINDOWS}"'
+        ' Target="windows.xml"/>\n'
         '</Relationships>'
     )
 
 
-def _pages_xml(pages: List[Page]) -> str:
+def _pages_xml(pages: List[Page], page_sizes: List[tuple[float, float]]) -> str:
     entries = []
     for i, page in enumerate(pages):
         name = _esc(page.title or f"Page-{i + 1}")
+        page_w_in, page_h_in = page_sizes[i]
         entries.append(
-            f'  <Page ID="{i + 1}" NameU="{name}" IsCustomNameU="1"'
-            f' Name="{name}" IsCustomName="1">\n'
+            f'  <Page ID="{i}" NameU="{name}" IsCustomNameU="1"'
+            f' Name="{name}" IsCustomName="1" ViewScale="-1"'
+            f' ViewCenterX="{page_w_in / 2:.6f}" ViewCenterY="{page_h_in / 2:.6f}">\n'
+            '    <PageSheet LineStyle="0" FillStyle="0" TextStyle="0">\n'
+            f'      <Cell N="PageWidth" V="{page_w_in:.6f}"/>\n'
+            f'      <Cell N="PageHeight" V="{page_h_in:.6f}"/>\n'
+            '      <Cell N="ShdwOffsetX" V="0.125"/>\n'
+            '      <Cell N="ShdwOffsetY" V="-0.125"/>\n'
+            '      <Cell N="PageScale" V="1" U="IN_F"/>\n'
+            '      <Cell N="DrawingScale" V="1" U="IN_F"/>\n'
+            '      <Cell N="DrawingSizeType" V="0"/>\n'
+            '      <Cell N="DrawingScaleType" V="3"/>\n'
+            '      <Cell N="InhibitSnap" V="0"/>\n'
+            '      <Cell N="PageLockReplace" V="0" U="BOOL"/>\n'
+            '      <Cell N="PageLockDuplicate" V="0" U="BOOL"/>\n'
+            '      <Cell N="UIVisibility" V="0"/>\n'
+            '      <Cell N="ShdwType" V="0"/>\n'
+            '      <Cell N="ShdwObliqueAngle" V="0"/>\n'
+            '      <Cell N="ShdwScaleFactor" V="1"/>\n'
+            '      <Cell N="DrawingResizeType" V="1"/>\n'
+            '      <Cell N="PageShapeSplit" V="1"/>\n'
+            '      <Cell N="PageLeftMargin" V="0.2"/>\n'
+            '      <Cell N="PageRightMargin" V="0.2"/>\n'
+            '      <Cell N="PageTopMargin" V="0.2"/>\n'
+            '      <Cell N="PageBottomMargin" V="0.2"/>\n'
+            '      <Cell N="PrintPageOrientation" V="2"/>\n'
+            '      <Cell N="LineJumpCode" V="0"/>\n'
+            '      <Cell N="LineJumpStyle" V="1"/>\n'
+            '    </PageSheet>\n'
             f'    <Rel r:id="rId{i + 1}"'
             f' xmlns:r="{_NS_REL}"/>\n'
             f'  </Page>'
@@ -162,6 +209,30 @@ def _pages_rels(pages: List[Page]) -> str:
         f'<Relationships xmlns="{_NS_PKG}">\n'
         f'{entries}\n'
         '</Relationships>'
+    )
+
+
+def _windows_xml(page_sizes: List[tuple[float, float]]) -> str:
+    page_w_in, page_h_in = page_sizes[0] if page_sizes else (11.0, 8.5)
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<Windows ClientWidth="1920" ClientHeight="977" xmlns="{_NS_VISIO}" xmlns:r="{_NS_REL}" xml:space="preserve">'
+        f'<Window ID="0" WindowType="Drawing" WindowState="1073741824" WindowLeft="-8" WindowTop="-31" WindowWidth="1936" WindowHeight="1016" ContainerType="Page" Page="0" ViewScale="-1" ViewCenterX="{page_w_in / 2:.6f}" ViewCenterY="{page_h_in / 2:.6f}">'
+        '<ShowRulers>1</ShowRulers><ShowGrid>0</ShowGrid><ShowPageBreaks>1</ShowPageBreaks><ShowGuides>1</ShowGuides><ShowConnectionPoints>1</ShowConnectionPoints><GlueSettings>9</GlueSettings><SnapSettings>65847</SnapSettings><SnapExtensions>34</SnapExtensions><SnapAngles/><DynamicGridEnabled>1</DynamicGridEnabled><TabSplitterPos>0.5</TabSplitterPos></Window></Windows>'
+    )
+
+
+def _app_xml() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"></Properties>'
+    )
+
+
+def _core_xml() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"></cp:coreProperties>'
     )
 
 
@@ -259,8 +330,19 @@ def _connector_xml(
     src = item_map.get(line.source_id) if line.source_id else None
     tgt = item_map.get(line.target_id) if line.target_id else None
 
-    bx, by = _ctr(src) if src else (1.0, page_h_in / 2.0)
-    ex, ey = _ctr(tgt) if tgt else (2.0, page_h_in / 2.0)
+    if src is not None:
+        bx, by = _ctr(src)
+    elif line.start_x is not None and line.start_y is not None:
+        bx, by = line.start_x / DPI, page_h_in - (line.start_y / DPI)
+    else:
+        bx, by = (1.0, page_h_in / 2.0)
+
+    if tgt is not None:
+        ex, ey = _ctr(tgt)
+    elif line.end_x is not None and line.end_y is not None:
+        ex, ey = line.end_x / DPI, page_h_in - (line.end_y / DPI)
+    else:
+        ex, ey = (2.0, page_h_in / 2.0)
 
     b_arrow = _ARROW_OUT.get(line.source_arrow, 0)
     e_arrow = _ARROW_OUT.get(line.target_arrow, 1)
@@ -387,29 +469,26 @@ def write_vsdx(
 
     # Only include pages that have content
     pages = [p for p in doc.pages if p.items or p.lines]
+    page_sizes: List[tuple[float, float]] = []
+    for page in pages:
+        max_x_px = max((it.x + it.width for it in page.items), default=800.0)
+        max_y_px = max((it.y + it.height for it in page.items), default=600.0)
+        page_sizes.append(((max_x_px + CONT_PAD) / DPI, (max_y_px + CONT_PAD) / DPI))
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml",               _content_types(len(pages)))
         zf.writestr("_rels/.rels",                        _root_rels())
+        zf.writestr("docProps/app.xml",                   _app_xml())
+        zf.writestr("docProps/core.xml",                  _core_xml())
         zf.writestr("visio/document.xml",                 _document_xml())
         zf.writestr("visio/_rels/document.xml.rels",      _document_rels())
-        zf.writestr("visio/pages/pages.xml",              _pages_xml(pages))
+        zf.writestr("visio/windows.xml",                  _windows_xml(page_sizes))
+        zf.writestr("visio/pages/pages.xml",              _pages_xml(pages, page_sizes))
         zf.writestr("visio/pages/_rels/pages.xml.rels",   _pages_rels(pages))
 
         for idx, page in enumerate(pages):
-            # Page size in inches: bounding box of all items + padding
-            if page.items:
-                max_x_px = max(it.x + it.width for it in page.items)
-            else:
-                max_x_px = 800.0
-            if page.items:
-                max_y_px = max(it.y + it.height for it in page.items)
-            else:
-                max_y_px = 600.0
-            page_w_in = (max_x_px + CONT_PAD) / DPI
-            page_h_in = (max_y_px + CONT_PAD) / DPI
-
+            page_w_in, page_h_in = page_sizes[idx]
             zf.writestr(
                 f"visio/pages/page{idx + 1}.xml",
                 _page_xml(page, page_w_in, page_h_in),
