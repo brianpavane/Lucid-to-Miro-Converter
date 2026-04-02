@@ -9,16 +9,18 @@ data each format preserves, and which format to choose for each use case.
 
 | Use case | Recommended format |
 |----------|--------------------|
-| Cloud / network diagrams (VPC, AWS, GCP, Azure) | **CSV** |
-| Flowcharts with nested swimlanes | **CSV** |
-| Flat diagrams (no containers) | CSV or JSON — equivalent |
-| Exact class names needed for shape mapping | **JSON** |
-| Automated Miro REST API upload | **CSV** |
-| Visio round-trip (editable shapes in other tools) | **Visio (.vsdx)** |
+| **Automated Miro upload (best fidelity)** | **Visio (.vsdx)** ⭐ |
+| Cloud / network diagrams (VPC, AWS, GCP, Azure) | **Visio (.vsdx)** or CSV |
+| Flowcharts with nested swimlanes | **Visio (.vsdx)** or CSV |
+| Flat diagrams (no containers) | CSV, JSON, or Visio — equivalent |
+| Exact class names needed for custom shape mapping | **JSON** |
+| Round-trip to Microsoft Visio or draw.io | **Visio (.vsdx)** |
 | Static reference copy (non-editable) | **SVG** or **PDF** |
 
-**Bottom line:** Use CSV for all Miro uploads unless the diagram is 100%
-flat (no containers, no swimlanes).
+**Bottom line:** Export as **Visio (.vsdx)** for all Miro uploads.  VSDX
+preserves original layout coordinates, containment, styling, and embedded
+icons — no auto-layout approximation needed.  Use CSV as a fallback when
+a VSDX export is unavailable.
 
 ---
 
@@ -134,7 +136,7 @@ in a grid instead of the correct nested layout.
 
 ---
 
-## Format 3 — Visio (.vsdx)
+## Format 3 — Visio (.vsdx) ⭐ Recommended for Miro upload
 
 **How to export:** File → Export → Visio (`.vsdx`)
 
@@ -143,29 +145,55 @@ in a grid instead of the correct nested layout.
 - Shapes, connectors, labels  
 - Container/lane structure (preserved as Visio groups)  
 - Multi-page tabs (each page → a Visio page)  
-- Basic styling (fill colour, border, font)  
-- Custom icons embedded as images  
+- **Pixel-accurate layout** — original `x/y/width/height` from LucidChart  
+- Fill colour, border colour, and font styling per shape  
+- Custom icons embedded as images inside the archive  
 
-### Use cases
+### Why VSDX is recommended
 
-| Scenario | Notes |
-|----------|-------|
-| Miro Visio import | Miro supports `.vsdx` import natively — shapes become editable Miro items |
-| Round-trip to Microsoft Visio | Full native Visio support |
-| Import into other tools (draw.io, Lucid) | Broad compatibility |
+| Advantage | Details |
+|-----------|---------|
+| **Original layout preserved** | Visio geometry is converted at 96 dpi — the Miro board matches your LucidChart diagram exactly, no auto-layout approximation |
+| **No coordinate guessing** | CSV/JSON carry no pixel positions; VSDX does |
+| **Embedded icons** | Cloud-provider and custom icons are extracted automatically; a template icon map is generated for you |
+| **Containment + styling** | Group nesting and per-shape fill/border colours are read directly from the Visio XML |
+| **Fully automatable** | `lucid2miro.py` parses VSDX and uploads via REST API in one command |
 
-### Miro Visio import path
+### How to use VSDX with lucid2miro
+
+```bash
+# Offline: convert to Miro JSON
+python lucid2miro.py diagram.vsdx
+
+# Direct upload to a new Miro board
+export MIRO_TOKEN=your_token_here
+python lucid2miro.py diagram.vsdx --upload
+
+# Batch convert all VSDX files in a folder
+python lucid2miro.py ./exports/ --format vsdx --upload
+
+# Preview without uploading
+python lucid2miro.py diagram.vsdx --upload --dry-run --summary
+```
+
+### Manual Miro Visio import (UI only — not automated)
 
 1. Export from LucidChart: File → Export → Visio (`.vsdx`)
 2. In Miro: **+** → **Upload from computer** → select the `.vsdx` file
 3. Each Visio page becomes a Miro Frame
 
-**Trade-offs vs CSV + REST API:**
-- Visio import via the Miro UI is manual.  **Use `lucid2miro --upload` with a
-  `.vsdx` input for fully automated upload via the REST API.**
-- Some LucidChart-specific shape types may not map cleanly to Miro shapes
-- Connectors are usually preserved but complex routing may change
-- Custom icons from cloud provider libraries may not embed correctly
+> **Prefer the REST API path** (`lucid2miro --upload`) over the manual UI
+> import — it supports batch processing, custom naming, icon mapping, and
+> dry-run preview.
+
+### Notes
+
+- Some LucidChart-specific shape types may render as generic rectangles in
+  Miro (no native Miro equivalent); use `--icon-map` to restore cloud icons
+- Connectors are preserved; complex polyline routing is straightened to
+  straight connectors in Miro
+- Custom icons are extracted to `<stem>_icons/`; update
+  `<stem>_icon_map.json` with hosted URLs and pass `--icon-map` to include them
 
 ---
 
@@ -227,18 +255,52 @@ collaborative diagram editing in Miro.
 
 ## Format comparison table
 
-| Feature | CSV | JSON | Visio | SVG | PDF |
-|---------|-----|------|-------|-----|-----|
-| Containment hierarchy | ✅ | ❌ | ✅ | — | — |
-| Nested layout in Miro | ✅ | ❌ | ✅ | — | — |
+| Feature | Visio (.vsdx) ⭐ | CSV | JSON | SVG | PDF |
+|---------|-----------------|-----|------|-----|-----|
+| **Recommended for Miro upload** | ⭐ Yes | Fallback | Flat only | ❌ | ❌ |
+| Containment hierarchy | ✅ | ✅ | ❌ | — | — |
+| Nested layout in Miro | ✅ | ✅ auto | ❌ flat | — | — |
+| Original layout preserved | ✅ pixel-accurate | ❌ auto | ❌ auto | ✅ | ✅ |
+| Per-shape styling (fill/border) | ✅ | ❌ | ❌ | ✅ | ✅ |
 | Multi-tab support | ✅ | ✅ | ✅ | ❌ one page | ✅ |
 | Editable shapes in Miro | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Custom icons (visual) | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Shape Library metadata | ✅ | ❌ | partial | — | — |
-| Exact class names | ❌ | ✅ | — | — | — |
-| Automatable (REST API) | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Original layout preserved | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Custom icons (embedded) | ✅ extracted | ❌ | ❌ | ✅ | ✅ |
+| Shape Library metadata | partial | ✅ | ❌ | — | — |
+| Exact internal class names | — | ❌ | ✅ | — | — |
+| Automatable (REST API upload) | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Zero-dependency tool support | ✅ | ✅ | ✅ | ❌ | ❌ |
+
+---
+
+## Miro import method comparison: File Upload vs REST API
+
+This table compares importing into Miro via the **Miro UI file upload** (manual,
+browser-based) versus using **`lucid2miro --upload`** (REST API, automated).
+
+| Capability | Miro UI file upload | `lucid2miro --upload` (REST API) |
+|------------|--------------------|---------------------------------|
+| Supported input formats | `.vsdx` only | `.vsdx`, `.csv`, `.json` |
+| Automation / scripting | ❌ manual | ✅ fully automated |
+| CI/CD integration | ❌ | ✅ |
+| Batch import (multiple files) | ❌ one at a time | ✅ `--format vsdx` on a directory |
+| Original Visio layout | ✅ (`.vsdx`) | ✅ (`.vsdx`) |
+| Auto-layout for CSV/JSON | — | ✅ containment tree (CSV) / grid (JSON) |
+| Custom board naming | ❌ uses filename | ✅ `--board-name` |
+| Frame prefix / suffix | ❌ | ✅ `--frame-prefix`, `--frame-suffix` |
+| Custom icon mapping | ❌ | ✅ `--icon-map` |
+| Page filtering | ❌ all pages | ✅ `--pages` |
+| Upload to existing board | ❌ creates new | ✅ `--board-id` |
+| Dry-run / preview | ❌ | ✅ `--dry-run --summary` |
+| Editable shapes in Miro | ✅ | ✅ |
+| Miro token required | ❌ (browser auth) | ✅ `MIRO_TOKEN` env var or `--token` |
+| No install required | ✅ browser | ✅ single Python file |
+
+**When to use each:**
+
+- **Miro UI upload** — one-off import of a single VSDX file; no token setup needed.
+- **`lucid2miro --upload`** — any scenario requiring automation, batching, naming
+  control, icon mapping, or CI/CD integration.  Also the only path for CSV and JSON
+  inputs.
 
 ---
 

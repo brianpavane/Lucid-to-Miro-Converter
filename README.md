@@ -8,10 +8,11 @@ directly to a Miro board via the REST API.
 **Requires:** Python 3.8+ — no third-party packages needed. Works on macOS, Windows, and Linux.
 
 **Supported input formats:**
-| Format | How to export from Lucidchart |
-|--------|-------------------------------|
-| `.csv`  | File → Export → CSV  |
-| `.json` | File → Export → JSON |
+| Format | How to export from Lucidchart | Notes |
+|--------|-------------------------------|-------|
+| `.vsdx` | File → Export → Visio (.vsdx) | ⭐ **Recommended** — preserves original layout, styling, and icons |
+| `.csv`  | File → Export → CSV  | Auto-layout with containment hierarchy |
+| `.json` | File → Export → JSON | Auto-layout, flat only |
 
 **Two output modes:**
 | Mode | When to use |
@@ -63,9 +64,10 @@ cd Lucid-to-Miro-Converter
 ### Offline JSON output (no Miro account needed)
 
 ```bash
+python lucid2miro.py diagram.vsdx          # → diagram.miro.json  (recommended)
 python lucid2miro.py diagram.csv           # → diagram.miro.json
 python lucid2miro.py diagram.json -o board.json --pretty --summary
-python lucid2miro.py ./exports/ --format csv --output-dir ./miro/
+python lucid2miro.py ./exports/ --format vsdx --output-dir ./miro/
 ```
 
 ### REST API upload (direct to Miro)
@@ -74,11 +76,14 @@ python lucid2miro.py ./exports/ --format csv --output-dir ./miro/
 # 1. Get a Personal Access Token from Miro (see docs/MIRO_AUTH.md)
 export MIRO_TOKEN=your_token_here
 
-# 2. Upload — creates a new board automatically
+# 2. Upload VSDX — preserves original layout, styling, and icons (recommended)
+python lucid2miro.py diagram.vsdx --upload
+
+# 3. Upload CSV — auto-layout with containment hierarchy
 python lucid2miro.py diagram.csv --upload
 
-# 3. Preview without uploading
-python lucid2miro.py diagram.csv --upload --dry-run --summary
+# 4. Preview without uploading
+python lucid2miro.py diagram.vsdx --upload --dry-run --summary
 ```
 
 ---
@@ -87,16 +92,16 @@ python lucid2miro.py diagram.csv --upload --dry-run --summary
 
 ```bash
 # Single file (offline)
-python lucid2miro.py <input.csv|json> [options]
+python lucid2miro.py <input.vsdx|csv|json> [options]
 
 # Batch (offline)
-python lucid2miro.py <input-dir/> --format csv|json [--output-dir <dir/>] [options]
+python lucid2miro.py <input-dir/> --format vsdx|csv|json [--output-dir <dir/>] [options]
 
 # Single file (upload)
-python lucid2miro.py <input.csv|json> --upload [upload-options]
+python lucid2miro.py <input.vsdx|csv|json> --upload [upload-options]
 
 # Batch (upload)
-python lucid2miro.py <input-dir/> --format csv|json --upload [upload-options]
+python lucid2miro.py <input-dir/> --format vsdx|csv|json --upload [upload-options]
 ```
 
 ### Shared flags
@@ -113,7 +118,7 @@ python lucid2miro.py <input-dir/> --format csv|json --upload [upload-options]
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--format csv\|json` | *(Batch)* File type to convert *(required)* | — |
+| `--format vsdx\|csv\|json` | *(Batch)* File type to convert *(required)* | — |
 | `--output-dir DIR` | *(Batch)* Directory for converted files | Input directory |
 | `-o, --output FILE` | *(Single)* Output file path | `<input>.miro.json` |
 | `--pretty` | Pretty-print output JSON | off |
@@ -155,44 +160,50 @@ python lucid2miro.py diagram.csv --upload \
 ### Offline examples
 
 ```bash
-# Basic conversion
+# VSDX — preserves original layout (recommended)
+python lucid2miro.py diagram.vsdx
+
+# CSV — auto-layout with containment hierarchy
 python lucid2miro.py diagram.csv
 
 # Custom title, pretty output, summary
-python lucid2miro.py diagram.csv -t "My Architecture" --pretty --summary
+python lucid2miro.py diagram.vsdx -t "My Architecture" --pretty --summary
 
 # Specific pages by title
-python lucid2miro.py diagram.json --pages "HA,Forwarding Rules"
+python lucid2miro.py diagram.vsdx --pages "HA,Forwarding Rules"
 
-# Batch — all CSVs in ./exports/ → ./miro/
-python lucid2miro.py ./exports/ --format csv --output-dir ./miro/
+# Batch — all VSDX files in ./exports/ → ./miro/
+python lucid2miro.py ./exports/ --format vsdx --output-dir ./miro/
 
-# Clean output names (diagram.csv → diagram.json)
-python lucid2miro.py ./exports/ --format csv --output-dir ./miro/ --clean-names
+# Clean output names (diagram.vsdx → diagram.json)
+python lucid2miro.py ./exports/ --format vsdx --output-dir ./miro/ --clean-names
 ```
 
 ### Upload examples
 
 ```bash
-# Upload a single diagram (creates new board)
+# Upload VSDX — original layout + styling (recommended)
+python lucid2miro.py diagram.vsdx --upload
+
+# Upload CSV — auto-layout with containment hierarchy
 python lucid2miro.py diagram.csv --upload
 
 # Upload to an existing board
-python lucid2miro.py diagram.csv --upload --board-id uXjVPabc1234=
+python lucid2miro.py diagram.vsdx --upload --board-id uXjVPabc1234=
 
 # Name the board and frames
-python lucid2miro.py diagram.csv --upload \
+python lucid2miro.py diagram.vsdx --upload \
   --board-name "Prod Infrastructure" \
   --frame-prefix "Env: "
 
-# Batch upload all CSVs in ./exports/
-python lucid2miro.py ./exports/ --format csv --upload --summary
+# Batch upload all VSDX files in ./exports/
+python lucid2miro.py ./exports/ --format vsdx --upload --summary
 
 # Dry run — see what would be created without calling the API
-python lucid2miro.py diagram.csv --upload --dry-run --summary
+python lucid2miro.py diagram.vsdx --upload --dry-run --summary
 
-# With custom icons
-python lucid2miro.py diagram.csv --upload --icon-map icon-map.json
+# With custom icons (generated from VSDX extraction)
+python lucid2miro.py diagram.vsdx --upload --icon-map diagram_icon_map.json
 ```
 
 **`--clean-names`** requires `--output-dir` to point to a **different** directory than the input to prevent source files from being overwritten.
@@ -244,35 +255,44 @@ Produces JSON compatible with the Miro REST API v2:
 
 ---
 
-## CSV vs JSON — which format to use
+## Which format to use
 
-**Use CSV.** It produces significantly better results and is the recommended input format.
+**Use VSDX.** It is the recommended format for all Miro uploads.
 
-### Why CSV is preferred
+### Why VSDX is best
 
-Lucidchart's CSV export includes a `Contained By` column that encodes the full containment hierarchy for every shape — which region contains which Availability Zone, which subnet sits inside which VPC, and so on. The converter uses this to reconstruct a proper nesting tree and lay out containers wrapping their children, exactly as they appear in the original diagram.
+Lucidchart's VSDX export embeds exact pixel coordinates, per-shape styling (fill colour, border colour), containment grouping, and custom icon images. The converter uses these directly — no layout approximation. The resulting Miro board matches the original LucidChart diagram as closely as possible.
 
-Lucidchart's JSON export omits all position and containment data entirely. Every shape on a page is a peer with no parent; the converter can only cluster shapes that share a `group_id` and arrange those clusters in a flat grid. The resulting Miro board is structurally flat regardless of how deeply nested the original diagram was.
+| Capability | VSDX ⭐ | CSV | JSON |
+|---|---|---|---|
+| Original layout preserved (pixel coords) | ✅ | ❌ auto | ❌ auto |
+| Containment hierarchy | ✅ | ✅ | ❌ |
+| Per-shape fill / border styling | ✅ | ❌ | ❌ |
+| Custom icons (embedded) | ✅ extracted | ❌ | ❌ |
+| Shape Library metadata | partial | ✅ | ❌ |
+| Exact internal class names | — | ❌ | ✅ |
+| Automatable via REST API | ✅ | ✅ | ✅ |
 
-| Capability | CSV | JSON |
-|---|---|---|
-| Containment hierarchy (`Contained By`) | ✅ | ❌ |
-| Nested layout (VPC → AZ → Subnet → shape) | ✅ | ❌ |
-| Shape Library name (AWS 2021, GCP 2018…) | ✅ | ❌ |
-| Exact internal class name (`DefaultSquareBlock`) | ❌ | ✅ |
-| Structured text-area labels | ❌ | ✅ |
+### When to use CSV
 
-The containment hierarchy advantage is decisive for any cloud architecture, network, or swimlane diagram. The JSON class-name and text-label advantages are minor in practice — the CSV `Name` + `Shape Library` columns provide enough signal to map every shape type correctly.
+Use CSV when a VSDX export is unavailable. The `Contained By` column encodes
+the full nesting hierarchy and the auto-layout engine reconstructs proper
+container wrapping — a significantly better result than JSON for cloud
+architecture and swimlane diagrams.
 
 ### When JSON is acceptable
 
 Use JSON only when:
-- The diagram is intentionally flat (no containers — just shapes connected by lines), in which case both formats produce equivalent results
-- A CSV export is unavailable for that diagram
+- The diagram is intentionally flat (shapes connected by arrows, no containers)
+- Neither VSDX nor CSV is available for that diagram
 
 ## Auto-layout
 
-Neither Lucidchart export format carries coordinate data, so the converter auto-lays out every diagram:
+VSDX input carries exact coordinates — no auto-layout is run; the Miro board
+matches the original diagram pixel-for-pixel (scaled to 96 dpi).
+
+For CSV and JSON, neither format carries coordinate data, so the converter
+auto-lays out the diagram:
 
 - **CSV** — reconstructs the containment tree from the `Contained By` column. Leaf shapes get default dimensions (160×80 px; 80×80 for icons). Containers are sized bottom-up to wrap their children. All top-level items are arranged in a √n-column grid.
 - **JSON** — no containment data is available. Shapes sharing a `group_id` are clustered together; clusters are arranged in a grid.
@@ -282,17 +302,20 @@ Neither Lucidchart export format carries coordinate data, so the converter auto-
 ## Features
 
 - Single self-contained file — one download, no package installation
+- **Three input formats:** VSDX (recommended), CSV, JSON
+- **VSDX:** original layout, per-shape styling, and embedded icons preserved
 - Batch / bulk mode — convert an entire folder in one command
 - Multi-tab support — each Lucidchart page → a Miro frame, placed side-by-side
 - 50+ shape type mappings (basic, flowchart, AWS/GCP/Azure containers, arrows, callouts)
 - Connectors with labels and arrow styles
 - Optional page filtering and coordinate scaling
+- Direct REST API upload (`--upload`) with dry-run support
 
 ---
 
 ## Running tests
 
-The repository includes 62 tests for the importable package (`lucid_to_miro/`):
+The repository includes 85 tests for the importable package (`lucid_to_miro/`):
 
 ```bash
 # Built-in unittest (no install needed)
@@ -321,10 +344,11 @@ See **[docs/MIRO_AUTH.md](docs/MIRO_AUTH.md)** for the full guide covering:
 
 See **[docs/LUCIDCHART_FORMATS.md](docs/LUCIDCHART_FORMATS.md)** for a full comparison of:
 
-- **CSV** — recommended; preserves containment hierarchy for nested layout
+- **Visio (.vsdx)** ⭐ — recommended; preserves original layout, styling, and icons
+- **CSV** — auto-layout with containment hierarchy; fallback when VSDX unavailable
 - **JSON** — flat only; use for simple diagrams without containers
-- **Visio (.vsdx)** — editable shapes via Miro's native Visio import
 - **SVG / PDF** — static reference boards
+- **Miro UI file upload vs REST API** — full capability comparison table
 
 ---
 
@@ -337,7 +361,8 @@ lucid_to_miro/            ← importable package (same logic, modular layout)
 ├── model.py
 ├── parser/
 │   ├── csv_parser.py
-│   └── json_parser.py
+│   ├── json_parser.py
+│   └── vsdx_parser.py    ← Visio parser (new in v1.5.0)
 ├── converter/
 │   ├── miro.py
 │   ├── shape_map.py

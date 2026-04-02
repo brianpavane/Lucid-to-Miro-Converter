@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Data model

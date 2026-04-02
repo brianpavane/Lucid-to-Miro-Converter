@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.6.0] — 2026-04-02
+
+### Changed
+
+- **VSDX now the recommended input format** — documentation updated throughout
+  to recommend Visio (`.vsdx`) export from LucidChart as the primary format for
+  all Miro uploads; CSV retained as the recommended fallback
+- **`docs/LUCIDCHART_FORMATS.md`** restructured:
+  - Summary recommendation table updated: VSDX promoted to top recommendation
+    with ⭐ marker; CSV noted as fallback
+  - Format 3 (Visio) section expanded with "Why VSDX is recommended" table,
+    full CLI usage examples, and comparison vs manual Miro UI import
+  - Format comparison table reordered: VSDX column first
+  - **New section: "Miro import method comparison: File Upload vs REST API"** —
+    full capability table comparing Miro UI drag-and-drop import vs
+    `lucid2miro --upload` across 15 dimensions (automation, batch, naming,
+    icon mapping, dry-run, supported formats, etc.)
+- **README** updated:
+  - Supported input formats table now lists `.vsdx` first with ⭐ recommendation
+  - Quick start examples lead with VSDX
+  - Usage synopsis updated to `vsdx|csv|json`
+  - "CSV vs JSON" section replaced by "Which format to use" covering all three
+    formats with a unified capability table
+  - Auto-layout section clarifies VSDX bypasses auto-layout entirely
+  - Features list updated; test count corrected to 85
+  - LucidChart export formats summary updated; project structure shows
+    `vsdx_parser.py`
+
+### Security
+
+- Pre-release scan performed (`/shannon` skill unavailable; manual review conducted)
+- No new code changes; documentation-only release
+- All other checks passed
+
 ## [1.5.0] — 2026-04-02
 
 ### Added
